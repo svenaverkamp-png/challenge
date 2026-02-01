@@ -14,9 +14,11 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod audio;
+mod text_insert;
 mod whisper;
 
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
+use text_insert::{InsertMethod, TextInsertResult, TextInsertSettings};
 use whisper::{
     DownloadProgress, ModelStatus, TranscriptionResult, WhisperError, WhisperLanguage,
     WhisperManager, WhisperModel, WhisperSettings,
@@ -57,7 +59,7 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Managed state for current app status, crash detection, hotkey, audio, and whisper
+/// Managed state for current app status, crash detection, hotkey, audio, whisper, and text insert
 pub struct AppState {
     current_status: Mutex<AppStatus>,
     had_previous_crash: Mutex<bool>,
@@ -70,6 +72,8 @@ pub struct AppState {
     // Whisper state (PROJ-4)
     whisper_manager: Mutex<WhisperManager>,
     whisper_settings: Mutex<WhisperSettings>,
+    // Text insert state (PROJ-6)
+    text_insert_settings: Mutex<TextInsertSettings>,
 }
 
 impl Default for AppState {
@@ -85,6 +89,7 @@ impl Default for AppState {
             audio_settings: Mutex::new(AudioSettings::default()),
             whisper_manager: Mutex::new(WhisperManager::new()),
             whisper_settings: Mutex::new(WhisperSettings::default()),
+            text_insert_settings: Mutex::new(TextInsertSettings::default()),
         }
     }
 }
@@ -801,6 +806,101 @@ async fn transcribe_audio<R: Runtime>(
     Ok(result)
 }
 
+// ============================================================================
+// Text Insert Commands (PROJ-6)
+// ============================================================================
+
+/// Get current text insert settings
+#[tauri::command]
+async fn get_text_insert_settings(state: State<'_, AppState>) -> Result<TextInsertSettings, String> {
+    let settings = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update text insert settings
+#[tauri::command]
+async fn set_text_insert_settings(
+    state: State<'_, AppState>,
+    settings: TextInsertSettings,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Persist to config file
+    text_insert::save_settings(&settings)?;
+
+    log::info!("Text insert settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Insert text into the active text field
+/// This is the main entry point for text insertion after transcription
+#[tauri::command]
+async fn insert_text<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<TextInsertResult, String> {
+    let settings = {
+        let s = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+
+    if !settings.enabled {
+        // Text insert disabled, just copy to clipboard as fallback
+        match text_insert::copy_to_clipboard(&text) {
+            Ok(()) => {
+                let _ = app.emit("text-insert-clipboard-only", &text);
+                return Ok(TextInsertResult {
+                    success: true,
+                    method_used: "clipboard_only".to_string(),
+                    chars_inserted: text.len(),
+                    error: None,
+                    in_clipboard: true,
+                });
+            }
+            Err(e) => {
+                return Ok(TextInsertResult {
+                    success: false,
+                    method_used: "none".to_string(),
+                    chars_inserted: 0,
+                    error: Some(e.to_string()),
+                    in_clipboard: false,
+                });
+            }
+        }
+    }
+
+    log::info!("Inserting text: {} characters", text.len());
+
+    // Perform text insertion
+    let result = text_insert::insert_text(&text, &settings);
+
+    // Emit appropriate event based on result
+    if result.success {
+        let _ = app.emit("text-insert-success", &result);
+        log::info!("Text inserted successfully via {}", result.method_used);
+    } else if result.in_clipboard {
+        let _ = app.emit("text-insert-clipboard-fallback", &result);
+        log::warn!("Text insert failed, text in clipboard: {:?}", result.error);
+    } else {
+        let _ = app.emit("text-insert-error", &result);
+        log::error!("Text insert failed: {:?}", result.error);
+    }
+
+    Ok(result)
+}
+
+/// Copy text to clipboard only (without paste simulation)
+/// Use this when user explicitly wants clipboard-only behavior
+#[tauri::command]
+async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    text_insert::copy_to_clipboard(&text).map_err(|e| e.to_string())
+}
+
 /// Register a global hotkey
 fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &str) -> Result<(), String> {
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
@@ -1109,7 +1209,10 @@ pub fn run() {
     let mut whisper_manager = WhisperManager::new();
     whisper_manager.update_settings(whisper_settings.clone());
 
-    // Create initial state with crash info, hotkey settings, audio, and whisper
+    // Load text insert settings (PROJ-6)
+    let text_insert_settings = text_insert::load_settings();
+
+    // Create initial state with crash info, hotkey settings, audio, whisper, and text insert
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -1121,6 +1224,7 @@ pub fn run() {
         audio_settings: Mutex::new(audio_settings),
         whisper_manager: Mutex::new(whisper_manager),
         whisper_settings: Mutex::new(whisper_settings),
+        text_insert_settings: Mutex::new(text_insert_settings),
     };
 
     if had_crash {
@@ -1210,7 +1314,12 @@ pub fn run() {
             load_whisper_model,
             unload_whisper_model,
             is_whisper_model_loaded,
-            transcribe_audio
+            transcribe_audio,
+            // Text insert commands (PROJ-6)
+            get_text_insert_settings,
+            set_text_insert_settings,
+            insert_text,
+            copy_text_to_clipboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

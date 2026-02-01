@@ -41,3 +41,7 @@ reqwest = { version = "0.11", features = ["stream"] }  # HTTP downloads with pro
 sha2 = "0.10"  # Hash verification for downloaded models
 futures-util = "0.3"  # For async stream processing
 tokio = { version = "1", features = ["sync", "fs"] }  # Async runtime for downloads
+
+# Text Insert dependencies (PROJ-6)
+arboard = "3"  # Cross-platform clipboard (better than clipboard crate)
+enigo = "0.2"  # Cross-platform keyboard simulation

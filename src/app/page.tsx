@@ -12,6 +12,7 @@ import { useAppStatus } from '@/hooks/use-app-status'
 import { useHotkey, RecordingStopResult } from '@/hooks/use-hotkey'
 import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useWhisper } from '@/hooks/use-whisper'
+import { useTextInsert } from '@/hooks/use-text-insert'
 import { useTauri } from '@/hooks/use-tauri'
 import { useOverlayWindow } from '@/hooks/use-overlay-window'
 import { invoke } from '@tauri-apps/api/core'
@@ -47,6 +48,13 @@ export default function Home() {
     modelStatus,
     settings: whisperSettings,
   } = useWhisper()
+
+  // Text insert integration (PROJ-6)
+  const {
+    insertText,
+    settings: textInsertSettings,
+    isInserting,
+  } = useTextInsert()
 
   // State for transcription result display
   const [transcriptionText, setTranscriptionText] = useState<string | null>(null)
@@ -86,9 +94,29 @@ export default function Home() {
         const transcriptionResult = await transcribe(result.file_path)
         if (transcriptionResult?.text) {
           setTranscriptionText(transcriptionResult.text)
-          toast.success('Transkription fertig', {
-            description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
-          })
+
+          // PROJ-6: Automatically insert text into active text field
+          if (textInsertSettings.enabled) {
+            const insertResult = await insertText(transcriptionResult.text)
+            if (insertResult?.success) {
+              toast.success('Text eingefuegt', {
+                description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+              })
+            } else if (insertResult?.in_clipboard) {
+              // Fallback to clipboard - toast already shown by hook
+            } else {
+              // Show transcription success even if insert failed
+              toast.success('Transkription fertig', {
+                description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+              })
+            }
+          } else {
+            // Text insert disabled - just show transcription success
+            toast.success('Transkription fertig', {
+              description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+            })
+          }
+
           // PROJ-5: Notify overlay that transcription is done
           notifyDone()
         } else {
@@ -110,7 +138,7 @@ export default function Home() {
     }
 
     setStatus('idle')
-  }, [setStatus, transcribe, modelStatus, whisperSettings.model, isTauri, notifyRecordingStopped, notifyTranscribing, notifyDone, notifyError])
+  }, [setStatus, transcribe, insertText, textInsertSettings.enabled, modelStatus, whisperSettings.model, isTauri, notifyRecordingStopped, notifyTranscribing, notifyDone, notifyError])
 
   const handleRecordingCancel = useCallback((reason: string) => {
     setStatus('idle')

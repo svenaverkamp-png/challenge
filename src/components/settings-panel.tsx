@@ -10,6 +10,7 @@ import { useTauri } from '@/hooks/use-tauri'
 import { HotkeySettings } from '@/components/hotkey-settings'
 import { MicrophoneSettings } from '@/components/microphone-settings'
 import { WhisperSettings } from '@/components/whisper-settings'
+import { TextInsertSettings } from '@/components/text-insert-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -26,6 +27,9 @@ export function SettingsPanel() {
 
       {/* Whisper Settings (PROJ-4) */}
       <WhisperSettings />
+
+      {/* Text Insert Settings (PROJ-6) */}
+      <TextInsertSettings />
 
       {/* General Settings */}
       <Card>
