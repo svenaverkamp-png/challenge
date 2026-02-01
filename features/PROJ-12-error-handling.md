@@ -1,6 +1,6 @@
 # PROJ-12: Error Handling & Notifications
 
-## Status: 🔵 Planned
+## Status: ✅ Deployed (2026-02-01)
 
 ## Beschreibung
 Zentrales System für Fehlerbehandlung und User-Benachrichtigungen. Zeigt Toasts, Fehler-Overlays und bietet Retry-Funktionalität.
