@@ -52,6 +52,65 @@ pub struct OllamaModelInfo {
     pub size: u64,
 }
 
+/// Email context settings (PROJ-9)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EmailContextSettings {
+    /// Whether email context rules are enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Formality level: casual, neutral, formal
+    #[serde(default = "default_formality")]
+    pub formality_level: FormalityLevel,
+    /// Default greeting (e.g., "Viele Grüße")
+    #[serde(default = "default_greeting")]
+    pub default_greeting: String,
+    /// User's name for signature (e.g., "Sven Averkamp")
+    #[serde(default)]
+    pub user_name: String,
+    /// Automatically add greeting if none detected
+    #[serde(default = "default_true")]
+    pub auto_add_greeting: bool,
+    /// Optional extended signature (company, phone)
+    #[serde(default)]
+    pub signature: Option<String>,
+}
+
+/// Formality level for email context
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FormalityLevel {
+    Casual,
+    Neutral,
+    Formal,
+}
+
+impl Default for FormalityLevel {
+    fn default() -> Self {
+        FormalityLevel::Neutral
+    }
+}
+
+fn default_formality() -> FormalityLevel {
+    FormalityLevel::Neutral
+}
+
+fn default_greeting() -> String {
+    "Viele Grüße".to_string()
+}
+
+impl Default for EmailContextSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            formality_level: FormalityLevel::Neutral,
+            default_greeting: "Viele Grüße".to_string(),
+            user_name: String::new(),
+            auto_add_greeting: true,
+            signature: None,
+        }
+    }
+}
+
 /// Auto-edit settings
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OllamaSettings {
@@ -199,10 +258,8 @@ impl OllamaManager {
         let host = parsed.host_str().unwrap_or("");
 
         // Only allow localhost URLs to prevent SSRF attacks
-        let is_localhost = host == "localhost"
-            || host == "127.0.0.1"
-            || host == "::1"
-            || host == "[::1]";
+        let is_localhost =
+            host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]";
 
         if !is_localhost {
             log::warn!("Security: Blocked non-localhost URL: {}", url);
@@ -247,7 +304,11 @@ impl OllamaManager {
             chunks.push(current_chunk.join(" "));
         }
 
-        log::info!("Split text into {} chunks (total {} words)", chunks.len(), words.len());
+        log::info!(
+            "Split text into {} chunks (total {} words)",
+            chunks.len(),
+            words.len()
+        );
         chunks
     }
 
@@ -286,10 +347,13 @@ impl OllamaManager {
                                 .map(|m| m.name.clone())
                                 .collect();
 
-                            let model_available = models
-                                .iter()
-                                .any(|m| m.starts_with(&self.settings.model) ||
-                                         self.settings.model.starts_with(m.split(':').next().unwrap_or("")));
+                            let model_available = models.iter().any(|m| {
+                                m.starts_with(&self.settings.model)
+                                    || self
+                                        .settings
+                                        .model
+                                        .starts_with(m.split(':').next().unwrap_or(""))
+                            });
 
                             OllamaStatus {
                                 connected: true,
@@ -327,7 +391,13 @@ impl OllamaManager {
     /// BUG-1 fix: Added English filler words
     /// BUG-2 fix: Added spelling reform option
     /// SEC-2 fix: Uses delimiters to prevent prompt injection
-    fn build_prompt(&self, text: &str, language: &str) -> String {
+    /// PROJ-9: Added email context support
+    fn build_prompt(
+        &self,
+        text: &str,
+        language: &str,
+        email_context: Option<&EmailContextSettings>,
+    ) -> String {
         let mut instructions = Vec::new();
         let is_german = language == "de" || language == "German" || language == "german";
         let is_english = language == "en" || language == "English" || language == "english";
@@ -387,11 +457,22 @@ impl OllamaManager {
         // SEC-2 fix: Use delimiters to separate user text from instructions
         let sanitized_text = Self::sanitize_text(text);
 
+        // PROJ-9: Build email context instructions if applicable
+        let email_instructions = if let Some(email_settings) = email_context {
+            if email_settings.enabled {
+                self.build_email_context_instructions(email_settings, is_german, is_english)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         format!(
             r#"Du bist ein präziser Text-Editor. Bearbeite den diktierten Text nach diesen Regeln:
 
 {}
-
+{}
 WICHTIG - STRIKTE REGELN:
 - Verändere NIEMALS die Bedeutung des Textes
 - Behalte den Stil des Sprechers
@@ -410,19 +491,128 @@ Der zu bearbeitende Text beginnt nach dem Marker und endet vor dem End-Marker:
 
 Gib NUR den korrigierten Text aus:"#,
             instructions_text,
+            email_instructions,
             language,
             delimiter = TEXT_DELIMITER,
             text = sanitized_text
         )
     }
 
+    /// Build email-specific context instructions (PROJ-9)
+    fn build_email_context_instructions(
+        &self,
+        settings: &EmailContextSettings,
+        is_german: bool,
+        is_english: bool,
+    ) -> String {
+        let formality_instruction = match settings.formality_level {
+            FormalityLevel::Casual => {
+                if is_german {
+                    "Verwende einen lockeren, freundlichen Ton."
+                } else {
+                    "Use a casual, friendly tone."
+                }
+            }
+            FormalityLevel::Neutral => {
+                if is_german {
+                    "Verwende einen neutralen, professionellen Ton."
+                } else {
+                    "Use a neutral, professional tone."
+                }
+            }
+            FormalityLevel::Formal => {
+                if is_german {
+                    "Verwende einen formellen, geschäftlichen Ton. Ersetze informelle Ausdrücke durch formellere Alternativen (Hey → Guten Tag, Ok → Verstanden, Klar → Selbstverständlich)."
+                } else {
+                    "Use a formal, business tone. Replace informal expressions with more formal alternatives (Hey → Hello, Ok → Understood, Sure → Certainly)."
+                }
+            }
+        };
+
+        let greeting = &settings.default_greeting;
+        let user_name = if settings.user_name.is_empty() {
+            "[Name]".to_string()
+        } else {
+            settings.user_name.clone()
+        };
+
+        let signature_text = if let Some(ref sig) = settings.signature {
+            format!("\n{}", sig)
+        } else {
+            String::new()
+        };
+
+        let auto_greeting_instruction = if settings.auto_add_greeting {
+            if is_german {
+                format!(
+                    "Wenn der Text länger als 20 Wörter ist und keine Grußformel enthält, füge am Ende hinzu:\n\n{},\n{}{}",
+                    greeting, user_name, signature_text
+                )
+            } else {
+                format!(
+                    "If the text is longer than 20 words and has no closing greeting, add at the end:\n\n{},\n{}{}",
+                    greeting, user_name, signature_text
+                )
+            }
+        } else {
+            String::new()
+        };
+
+        if is_german {
+            format!(
+                r#"
+
+KONTEXT: E-Mail-Anwendung erkannt.
+
+ZUSÄTZLICHE E-MAIL-REGELN:
+6. {}
+7. Strukturiere als E-Mail wenn > 20 Wörter:
+   - Erkenne Anreden am Textanfang (Hallo, Guten Tag, Liebe/Lieber, Hi, Moin, Servus) und setze ein Komma dahinter
+   - "Hi [Name]" → "Hallo [Name]," (formalisiert bei formellem Ton)
+   - Anrede auf eigener Zeile, dann Leerzeile
+   - Haupttext in Absätzen
+   - Erkenne Grußformeln (Viele Grüße, Mit freundlichen Grüßen, Beste Grüße, LG → Liebe Grüße)
+   - Leerzeile vor Grußformel
+8. {}
+9. Bei kurzen Antworten (< 20 Wörter): Keine Zwangs-Struktur, nur höflicher formulieren
+10. Erkenne Aufzählungen (erstens, zweitens, drittens) und formatiere als nummerierte Liste
+11. Bei "Absatz" oder langer Pause: Neuen Absatz beginnen
+"#,
+                formality_instruction, auto_greeting_instruction
+            )
+        } else {
+            format!(
+                r#"
+
+CONTEXT: Email application detected.
+
+ADDITIONAL EMAIL RULES:
+6. {}
+7. Structure as email if > 20 words:
+   - Recognize greetings at text start (Hello, Hi, Dear) and add comma
+   - Greeting on its own line, then blank line
+   - Main text in paragraphs
+   - Recognize closings (Best regards, Kind regards, Thanks)
+   - Blank line before closing
+8. {}
+9. For short replies (< 20 words): No forced structure, just make it more polite
+10. Recognize enumerations (first, second, third) and format as numbered list
+11. On "paragraph" or "new paragraph": Start new paragraph
+"#,
+                formality_instruction, auto_greeting_instruction
+            )
+        }
+    }
+
     /// Improve text using Ollama
     /// SEC-1 fix: URL validation
     /// BUG-5 fix: Chunking for long texts
+    /// PROJ-9: Added email_context parameter for context-aware processing
     pub async fn improve_text(
         &self,
         text: &str,
         language: &str,
+        email_context: Option<&EmailContextSettings>,
     ) -> Result<AutoEditResult, OllamaError> {
         let start_time = std::time::Instant::now();
 
@@ -464,9 +654,14 @@ Gib NUR den korrigierten Text aus:"#,
         let url = format!("{}/api/generate", self.settings.ollama_url);
 
         for (i, chunk) in chunks.iter().enumerate() {
-            log::debug!("Processing chunk {}/{}: {} words", i + 1, chunks.len(), chunk.split_whitespace().count());
+            log::debug!(
+                "Processing chunk {}/{}: {} words",
+                i + 1,
+                chunks.len(),
+                chunk.split_whitespace().count()
+            );
 
-            let prompt = self.build_prompt(chunk, language);
+            let prompt = self.build_prompt(chunk, language, email_context);
 
             let request = OllamaRequest {
                 model: self.settings.model.clone(),
@@ -478,20 +673,15 @@ Gib NUR den korrigierten Text aus:"#,
                 },
             };
 
-            let response = client
-                .post(&url)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|e| {
-                    if e.is_timeout() {
-                        OllamaError::Timeout(self.settings.timeout_seconds)
-                    } else if e.is_connect() {
-                        OllamaError::NotReachable(self.settings.ollama_url.clone())
-                    } else {
-                        OllamaError::RequestFailed(e.to_string())
-                    }
-                })?;
+            let response = client.post(&url).json(&request).send().await.map_err(|e| {
+                if e.is_timeout() {
+                    OllamaError::Timeout(self.settings.timeout_seconds)
+                } else if e.is_connect() {
+                    OllamaError::NotReachable(self.settings.ollama_url.clone())
+                } else {
+                    OllamaError::RequestFailed(e.to_string())
+                }
+            })?;
 
             if !response.status().is_success() {
                 let status = response.status();
@@ -623,6 +813,49 @@ pub fn save_settings(settings: &OllamaSettings) -> Result<(), String> {
     Ok(())
 }
 
+// ============================================================================
+// Email Context Settings (PROJ-9)
+// ============================================================================
+
+/// Get the path to the email context config file
+pub fn get_email_config_path() -> PathBuf {
+    let app_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.evervoice.app");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join("email_config.json")
+}
+
+/// Load email context settings from config file
+pub fn load_email_settings() -> EmailContextSettings {
+    let config_path = get_email_config_path();
+    if config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    EmailContextSettings::default()
+}
+
+/// Save email context settings to config file
+pub fn save_email_settings(settings: &EmailContextSettings) -> Result<(), String> {
+    let config_path = get_email_config_path();
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&config_path, &json).map_err(|e| e.to_string())?;
+
+    // Set restrictive permissions (owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        fs::set_permissions(&config_path, permissions).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,7 +872,7 @@ mod tests {
     #[test]
     fn test_build_prompt_german() {
         let manager = OllamaManager::new();
-        let prompt = manager.build_prompt("test text", "de");
+        let prompt = manager.build_prompt("test text", "de", None);
         assert!(prompt.contains("test text"));
         assert!(prompt.contains("Füllwörter"));
         assert!(prompt.contains(TEXT_DELIMITER));
@@ -648,10 +881,40 @@ mod tests {
     #[test]
     fn test_build_prompt_english() {
         let manager = OllamaManager::new();
-        let prompt = manager.build_prompt("test text", "en");
+        let prompt = manager.build_prompt("test text", "en", None);
         assert!(prompt.contains("test text"));
         // BUG-1 fix: English filler words should be in prompt
         assert!(prompt.contains("um, uh, like, you know"));
+    }
+
+    #[test]
+    fn test_build_prompt_with_email_context() {
+        let manager = OllamaManager::new();
+        let email_settings = EmailContextSettings {
+            enabled: true,
+            formality_level: FormalityLevel::Formal,
+            default_greeting: "Mit freundlichen Grüßen".to_string(),
+            user_name: "Test User".to_string(),
+            auto_add_greeting: true,
+            signature: None,
+        };
+        let prompt = manager.build_prompt("test text", "de", Some(&email_settings));
+        assert!(prompt.contains("E-Mail-Anwendung erkannt"));
+        assert!(prompt.contains("formellen"));
+        assert!(prompt.contains("Mit freundlichen Grüßen"));
+        assert!(prompt.contains("Test User"));
+    }
+
+    #[test]
+    fn test_email_context_disabled() {
+        let manager = OllamaManager::new();
+        let email_settings = EmailContextSettings {
+            enabled: false,
+            ..Default::default()
+        };
+        let prompt = manager.build_prompt("test text", "de", Some(&email_settings));
+        // Email context disabled, so no email instructions should appear
+        assert!(!prompt.contains("E-Mail-Anwendung erkannt"));
     }
 
     #[test]

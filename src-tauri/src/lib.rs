@@ -21,7 +21,7 @@ mod whisper;
 
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
 use context::{AppCategory, AppContext, AppMapping, ContextConfig, ContextManager};
-use ollama::{AutoEditResult, OllamaManager, OllamaSettings, OllamaStatus};
+use ollama::{AutoEditResult, EmailContextSettings, OllamaManager, OllamaSettings, OllamaStatus};
 use text_insert::{InsertMethod, TextInsertResult, TextInsertSettings};
 use whisper::{
     DownloadProgress, ModelStatus, TranscriptionResult, WhisperError, WhisperLanguage,
@@ -83,6 +83,8 @@ pub struct AppState {
     ollama_settings: Mutex<OllamaSettings>,
     // Context awareness state (PROJ-8)
     context_manager: Mutex<ContextManager>,
+    // Email context settings (PROJ-9)
+    email_settings: Mutex<EmailContextSettings>,
 }
 
 impl Default for AppState {
@@ -102,6 +104,7 @@ impl Default for AppState {
             ollama_manager: Mutex::new(OllamaManager::new()),
             ollama_settings: Mutex::new(OllamaSettings::default()),
             context_manager: Mutex::new(ContextManager::new()),
+            email_settings: Mutex::new(EmailContextSettings::default()),
         }
     }
 }
@@ -974,12 +977,14 @@ async fn check_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus,
 
 /// Improve text using Ollama (auto-edit)
 /// This is the main entry point for PROJ-7 text improvement
+/// PROJ-9: Added is_email_context parameter for context-aware processing
 #[tauri::command]
 async fn improve_text<R: Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     text: String,
     language: String,
+    is_email_context: Option<bool>,
 ) -> Result<AutoEditResult, String> {
     let settings = {
         let s = state.ollama_settings.lock().map_err(|e| e.to_string())?;
@@ -997,14 +1002,34 @@ async fn improve_text<R: Runtime>(
         });
     }
 
-    log::info!("Starting Ollama text improvement: {} chars", text.len());
+    // PROJ-9: Get email context settings if in email context
+    let email_context = if is_email_context.unwrap_or(false) {
+        let email_settings = state.email_settings.lock().map_err(|e| e.to_string())?;
+        if email_settings.enabled {
+            log::info!("Email context detected, applying email-specific rules");
+            Some(email_settings.clone())
+        } else {
+            log::debug!("Email context detected but email rules are disabled");
+            None
+        }
+    } else {
+        None
+    };
+
+    log::info!(
+        "Starting Ollama text improvement: {} chars, email_context: {}",
+        text.len(),
+        email_context.is_some()
+    );
 
     // Emit processing started event
     let _ = app.emit("ollama-processing-started", &text);
 
     let result = {
         let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
-        manager.improve_text(&text, &language).await
+        manager
+            .improve_text(&text, &language, email_context.as_ref())
+            .await
     };
 
     match result {
@@ -1155,6 +1180,36 @@ async fn get_app_categories() -> Result<Vec<(String, String)>, String> {
         .into_iter()
         .map(|(cat, name)| (format!("{:?}", cat).to_lowercase(), name.to_string()))
         .collect())
+}
+
+// ============================================================================
+// Email Context Commands (PROJ-9)
+// ============================================================================
+
+/// Get current email context settings
+#[tauri::command]
+async fn get_email_settings(state: State<'_, AppState>) -> Result<EmailContextSettings, String> {
+    let settings = state.email_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update email context settings
+#[tauri::command]
+async fn set_email_settings(
+    state: State<'_, AppState>,
+    settings: EmailContextSettings,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.email_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Persist to config file
+    ollama::save_email_settings(&settings)?;
+
+    log::info!("Email context settings updated: {:?}", settings);
+    Ok(())
 }
 
 /// Register a global hotkey
@@ -1523,7 +1578,10 @@ pub fn run() {
     let context_config = context::load_config();
     let context_manager = ContextManager::with_config(context_config);
 
-    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, and context
+    // Load email context settings (PROJ-9)
+    let email_settings = ollama::load_email_settings();
+
+    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, context, and email
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -1539,6 +1597,7 @@ pub fn run() {
         ollama_manager: Mutex::new(ollama_manager),
         ollama_settings: Mutex::new(ollama_settings),
         context_manager: Mutex::new(context_manager),
+        email_settings: Mutex::new(email_settings),
     };
 
     if had_crash {
@@ -1647,7 +1706,10 @@ pub fn run() {
             set_context_config,
             set_app_mapping,
             remove_app_mapping,
-            get_app_categories
+            get_app_categories,
+            // Email context commands (PROJ-9)
+            get_email_settings,
+            set_email_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

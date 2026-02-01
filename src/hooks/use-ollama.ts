@@ -53,8 +53,8 @@ interface UseOllamaReturn {
   updateSettings: (settings: Partial<OllamaSettings>) => Promise<void>
   /** Check Ollama connection status */
   checkStatus: () => Promise<OllamaStatus | null>
-  /** Improve text using Ollama */
-  improveText: (text: string, language: string) => Promise<AutoEditResult | null>
+  /** Improve text using Ollama (PROJ-9: supports email context) */
+  improveText: (text: string, language: string, isEmailContext?: boolean) => Promise<AutoEditResult | null>
   /** Pull (download) a model */
   pullModel: (model: string) => Promise<void>
   /** Common models for quick selection */
@@ -249,8 +249,9 @@ export function useOllama(): UseOllamaReturn {
   }, [isTauri])
 
   // Improve text using Ollama
+  // PROJ-9: Added isEmailContext parameter for email-specific formatting
   const improveText = useCallback(
-    async (text: string, language: string): Promise<AutoEditResult | null> => {
+    async (text: string, language: string, isEmailContext?: boolean): Promise<AutoEditResult | null> => {
       if (!isTauri) {
         // Web fallback: return original text
         return {
@@ -276,7 +277,12 @@ export function useOllama(): UseOllamaReturn {
         setError(null)
         setIsProcessing(true)
 
-        const result = await invoke<AutoEditResult>('improve_text', { text, language })
+        // PROJ-9: Pass isEmailContext to backend for email-specific prompt rules
+        const result = await invoke<AutoEditResult>('improve_text', {
+          text,
+          language,
+          isEmailContext: isEmailContext ?? false
+        })
         setLastResult(result)
         setIsProcessing(false)
         return result

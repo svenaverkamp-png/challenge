@@ -9,7 +9,7 @@ import { RecordingIndicator } from '@/components/recording-indicator'
 import { AccessibilityPermissionDialog } from '@/components/accessibility-permission-dialog'
 import { MicrophonePermissionDialog } from '@/components/microphone-permission-dialog'
 import { useAppStatus } from '@/hooks/use-app-status'
-import { useHotkey, RecordingStopResult } from '@/hooks/use-hotkey'
+import { useHotkey, RecordingStopResult, AppContext } from '@/hooks/use-hotkey'
 import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useWhisper } from '@/hooks/use-whisper'
 import { useTextInsert } from '@/hooks/use-text-insert'
@@ -75,7 +75,8 @@ export default function Home() {
     notifyRecordingStarted()
   }, [setStatus, notifyRecordingStarted])
 
-  const handleRecordingStop = useCallback(async (result: RecordingStopResult) => {
+  // PROJ-8/PROJ-9: Accept AppContext for context-aware text processing
+  const handleRecordingStop = useCallback(async (result: RecordingStopResult, context?: AppContext) => {
     setStatus('processing')
     // PROJ-5: Notify overlay
     notifyRecordingStopped()
@@ -92,6 +93,9 @@ export default function Home() {
       return
     }
 
+    // PROJ-9: Detect if we're in an email context
+    const isEmailContext = context?.category === 'email'
+
     // Start transcription (PROJ-4)
     if (result.file_path && isTauri) {
       try {
@@ -104,13 +108,15 @@ export default function Home() {
           let totalProcessingTime = transcriptionResult.processing_time_ms
 
           // PROJ-7: Improve text with Ollama (Auto-Edit)
+          // PROJ-9: Pass email context for email-specific formatting
           if (ollamaSettings.enabled) {
             // Notify overlay that AI improvement is starting
             notifyImproving()
             try {
               const improveResult = await improveText(
                 transcriptionResult.text,
-                transcriptionResult.language
+                transcriptionResult.language,
+                isEmailContext // PROJ-9: Pass email context flag
               )
               if (improveResult?.was_edited && improveResult.edited_text) {
                 finalText = improveResult.edited_text
