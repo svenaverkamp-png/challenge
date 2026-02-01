@@ -7,6 +7,7 @@ import { SettingsPanel } from '@/components/settings-panel'
 import { StatusIndicator } from '@/components/status-indicator'
 import { RecordingIndicator } from '@/components/recording-indicator'
 import { AccessibilityPermissionDialog } from '@/components/accessibility-permission-dialog'
+import { MicrophonePermissionDialog } from '@/components/microphone-permission-dialog'
 import { useAppStatus } from '@/hooks/use-app-status'
 import { useHotkey } from '@/hooks/use-hotkey'
 import { useTauri } from '@/hooks/use-tauri'
@@ -202,6 +203,9 @@ export default function Home() {
         onOpenChange={setShowPermissionDialog}
         onRequestPermission={requestAccessibilityPermission}
       />
+
+      {/* Microphone Permission Dialog (PROJ-3) */}
+      <MicrophonePermissionDialog />
     </div>
   )
 }

@@ -58,11 +58,11 @@ const DEFAULT_SETTINGS: HotkeySettings = {
   enabled: true,
 }
 
-/** Maximum recording time in milliseconds (6 minutes) */
-const MAX_RECORDING_TIME = 6 * 60 * 1000
+/** Default max recording time in minutes */
+const DEFAULT_MAX_DURATION_MINUTES = 6
 
-/** Warning time before max (5:30 = 5.5 minutes) */
-const WARNING_TIME = 5.5 * 60 * 1000
+/** Warning offset before max (30 seconds) */
+const WARNING_OFFSET_MS = 30 * 1000
 
 /** Debounce time for toggle mode (200ms) */
 const TOGGLE_DEBOUNCE_MS = 200
@@ -79,12 +79,14 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null)
   const [recordingDuration, setRecordingDuration] = useState(0)
   const [accessibilityPermissionRequired, setAccessibilityPermissionRequired] = useState(false)
+  const [maxDurationMinutes, setMaxDurationMinutes] = useState(DEFAULT_MAX_DURATION_MINUTES)
 
   // Refs for debouncing and timeout
   const lastToggleRef = useRef<number>(0)
   const maxTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Load settings on mount
   useEffect(() => {
@@ -97,6 +99,10 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
       try {
         const loaded = await invoke<HotkeySettings>('get_hotkey_settings')
         setSettings(loaded)
+
+        // Load audio settings for max duration (BUG-1 fix)
+        const audioSettings = await invoke<{ max_duration_minutes: number }>('get_audio_settings')
+        setMaxDurationMinutes(audioSettings.max_duration_minutes || DEFAULT_MAX_DURATION_MINUTES)
       } catch (err) {
         console.error('Failed to load hotkey settings:', err)
         setError('Hotkey-Einstellungen konnten nicht geladen werden')
@@ -129,8 +135,13 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     if (isTauri) {
       try {
         await invoke('set_recording_state', { recording: true })
+        // Start audio recording (PROJ-3)
+        await invoke('start_audio_recording')
       } catch (err) {
-        console.error('Failed to sync recording state:', err)
+        console.error('Failed to start recording:', err)
+        setError('Aufnahme konnte nicht gestartet werden')
+        setRecordingState('idle')
+        return
       }
     }
 
@@ -139,23 +150,45 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
       setRecordingDuration(Date.now() - now)
     }, 100)
 
-    // Set warning timeout (5:30)
+    // Start health check polling (BUG-2 fix: Device disconnect handling)
+    if (isTauri) {
+      healthCheckIntervalRef.current = setInterval(async () => {
+        try {
+          const streamError = await invoke<string | null>('check_audio_health')
+          if (streamError) {
+            // Device disconnected or stream error
+            toast.error('Mikrofon getrennt', {
+              description: 'Die Aufnahme wurde abgebrochen, da das Mikrofon getrennt wurde.',
+            })
+            cancelRecording('Mikrofon getrennt')
+          }
+        } catch (err) {
+          console.error('Health check failed:', err)
+        }
+      }, 500) // Check every 500ms
+    }
+
+    // Calculate timeouts based on user settings (BUG-1 fix)
+    const maxRecordingTimeMs = maxDurationMinutes * 60 * 1000
+    const warningTimeMs = maxRecordingTimeMs - WARNING_OFFSET_MS
+
+    // Set warning timeout (30 seconds before max)
     warningTimeoutRef.current = setTimeout(() => {
       toast.warning('Noch 30 Sekunden', {
         description: 'Maximale Aufnahmezeit wird bald erreicht',
       })
-    }, WARNING_TIME)
+    }, warningTimeMs)
 
-    // Set max timeout (6 minutes)
+    // Set max timeout (user-configured duration)
     maxTimeoutRef.current = setTimeout(() => {
       toast.info('Maximale Aufnahmezeit erreicht', {
         description: 'Aufnahme wird automatisch beendet',
       })
       stopRecording()
-    }, MAX_RECORDING_TIME)
+    }, maxRecordingTimeMs)
 
     events?.onRecordingStart?.()
-  }, [settings.mode, events, isTauri])
+  }, [settings.mode, events, isTauri, maxDurationMinutes])
 
   // Stop recording handler
   const stopRecording = useCallback(async () => {
@@ -172,26 +205,37 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
       clearInterval(durationIntervalRef.current)
       durationIntervalRef.current = null
     }
-
-    // Sync state with backend (BUG-3 fix)
-    if (isTauri) {
-      try {
-        await invoke('set_recording_state', { recording: false })
-      } catch (err) {
-        console.error('Failed to sync recording state:', err)
-      }
+    // Clear health check interval (BUG-2 fix)
+    if (healthCheckIntervalRef.current) {
+      clearInterval(healthCheckIntervalRef.current)
+      healthCheckIntervalRef.current = null
     }
 
     setRecordingState('processing')
-    events?.onRecordingStop?.()
 
-    // After processing is done, reset to idle (this should be called by the parent)
-    // For now, we set a short timeout to simulate
+    // Stop audio recording and get result (PROJ-3)
+    if (isTauri) {
+      try {
+        await invoke('set_recording_state', { recording: false })
+        const result = await invoke<{ file_path: string; duration_ms: number; privacy_mode: boolean }>('stop_audio_recording')
+        console.log('Recording saved to:', result.file_path)
+        // The file_path can be used by PROJ-4 (Whisper integration) for transcription
+        events?.onRecordingStop?.()
+      } catch (err) {
+        console.error('Failed to stop recording:', err)
+        setError('Aufnahme konnte nicht gespeichert werden')
+      }
+    } else {
+      events?.onRecordingStop?.()
+    }
+
+    // After processing is done, reset to idle
+    // In production, this should wait for transcription to complete (PROJ-4)
     setTimeout(() => {
       setRecordingState('idle')
       setRecordingStartTime(null)
       setRecordingDuration(0)
-    }, 100)
+    }, 500)
   }, [events, isTauri])
 
   // Cancel recording handler
@@ -210,13 +254,22 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
         clearInterval(durationIntervalRef.current)
         durationIntervalRef.current = null
       }
+      // Clear health check interval (BUG-2 fix)
+      if (healthCheckIntervalRef.current) {
+        clearInterval(healthCheckIntervalRef.current)
+        healthCheckIntervalRef.current = null
+      }
 
-      // Sync state with backend (BUG-3 fix)
+      // Stop audio recording and discard (PROJ-3)
       if (isTauri) {
         try {
           await invoke('set_recording_state', { recording: false })
+          // Stop and get the file, then delete it since cancelled
+          const result = await invoke<{ file_path: string; duration_ms: number; privacy_mode: boolean }>('stop_audio_recording')
+          // Delete the cancelled recording
+          await invoke('delete_recording', { filePath: result.file_path })
         } catch (err) {
-          console.error('Failed to sync recording state:', err)
+          console.error('Failed to cancel recording:', err)
         }
       }
 

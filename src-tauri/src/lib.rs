@@ -13,6 +13,9 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+mod audio;
+use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
+
 /// Hotkey mode: Push-to-Talk or Toggle
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum HotkeyMode {
@@ -48,7 +51,7 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Managed state for current app status, crash detection, and hotkey
+/// Managed state for current app status, crash detection, hotkey, and audio
 pub struct AppState {
     current_status: Mutex<AppStatus>,
     had_previous_crash: Mutex<bool>,
@@ -56,6 +59,8 @@ pub struct AppState {
     hotkey_settings: Mutex<HotkeySettings>,
     hotkey_press_time: Mutex<Option<std::time::Instant>>,
     is_recording: Mutex<bool>,
+    audio_recorder: Mutex<AudioRecorder>,
+    audio_settings: Mutex<AudioSettings>,
 }
 
 impl Default for AppState {
@@ -67,6 +72,8 @@ impl Default for AppState {
             hotkey_settings: Mutex::new(HotkeySettings::default()),
             hotkey_press_time: Mutex::new(None),
             is_recording: Mutex::new(false),
+            audio_recorder: Mutex::new(AudioRecorder::new()),
+            audio_settings: Mutex::new(AudioSettings::default()),
         }
     }
 }
@@ -383,6 +390,194 @@ async fn request_accessibility_permission() -> Result<(), String> {
     Ok(())
 }
 
+// ============================================================================
+// Audio Recording Commands (PROJ-3)
+// ============================================================================
+
+/// List available audio input devices
+#[tauri::command]
+async fn list_audio_devices(state: State<'_, AppState>) -> Result<Vec<AudioDevice>, String> {
+    let recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+    recorder.list_devices().map_err(|e| e.to_string())
+}
+
+/// Get current audio settings
+#[tauri::command]
+async fn get_audio_settings(state: State<'_, AppState>) -> Result<AudioSettings, String> {
+    let settings = state.audio_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update audio settings
+#[tauri::command]
+async fn set_audio_settings(state: State<'_, AppState>, settings: AudioSettings) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.audio_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Update recorder
+    {
+        let mut recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+        recorder.update_settings(settings.clone());
+    }
+
+    // Persist to config file
+    save_audio_settings(&settings)?;
+
+    log::info!("Audio settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Start audio recording
+#[tauri::command]
+async fn start_audio_recording<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Check if already recording
+    {
+        let recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+        if recorder.is_recording() {
+            return Ok(()); // Already recording
+        }
+    }
+
+    // Start recording
+    {
+        let mut recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+        recorder.start_recording().map_err(|e| {
+            let error_msg = e.to_string();
+            // Emit specific error events for UI handling
+            match e {
+                AudioError::NoDevicesFound | AudioError::NoDefaultDevice => {
+                    let _ = app.emit("audio-error-no-device", &error_msg);
+                }
+                AudioError::PermissionDenied => {
+                    let _ = app.emit("audio-error-permission", &error_msg);
+                }
+                AudioError::DeviceBusy => {
+                    let _ = app.emit("audio-error-busy", &error_msg);
+                }
+                _ => {
+                    let _ = app.emit("audio-error", &error_msg);
+                }
+            }
+            error_msg
+        })?;
+    }
+
+    // Note: Audio level is polled by frontend via get_audio_level command
+    // This avoids the need for complex thread management
+
+    // Emit recording started event
+    let _ = app.emit("recording-started", ());
+
+    log::info!("Audio recording started");
+    Ok(())
+}
+
+/// Stop audio recording and get the result
+#[tauri::command]
+async fn stop_audio_recording<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+) -> Result<RecordingResult, String> {
+    let result = {
+        let mut recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+        recorder.stop_recording().map_err(|e| {
+            let error_msg = e.to_string();
+            let _ = app.emit("audio-error", &error_msg);
+            error_msg
+        })?
+    };
+
+    // Emit recording complete event
+    let _ = app.emit("recording-complete", &result);
+
+    log::info!("Audio recording stopped: {:?}", result);
+    Ok(result)
+}
+
+/// Get current audio level (0-100)
+#[tauri::command]
+async fn get_audio_level(state: State<'_, AppState>) -> Result<u8, String> {
+    let recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+    Ok(recorder.get_level())
+}
+
+/// Check if currently recording audio
+#[tauri::command]
+async fn is_audio_recording(state: State<'_, AppState>) -> Result<bool, String> {
+    let recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+    Ok(recorder.is_recording())
+}
+
+/// Check audio stream health (BUG-2 fix: Device disconnect handling)
+/// Returns stream error if device was disconnected, None otherwise
+#[tauri::command]
+async fn check_audio_health(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+    Ok(recorder.get_stream_error())
+}
+
+/// Delete a recording file (for privacy mode)
+#[tauri::command]
+async fn delete_recording(file_path: String) -> Result<(), String> {
+    AudioRecorder::delete_recording(&file_path).map_err(|e| e.to_string())
+}
+
+/// Request microphone permission (macOS only)
+#[tauri::command]
+async fn request_microphone_permission() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        // Open System Preferences directly to Privacy & Security > Microphone
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn()
+            .map_err(|e| format!("Failed to open System Preferences: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        log::debug!("Microphone permission handled automatically on this platform");
+    }
+
+    Ok(())
+}
+
+/// Get the path to the audio settings config file
+fn get_audio_config_path() -> PathBuf {
+    let app_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.evervoice.app");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join("audio_config.json")
+}
+
+/// Load audio settings from config file
+fn load_audio_settings() -> AudioSettings {
+    let config_path = get_audio_config_path();
+    if config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    AudioSettings::default()
+}
+
+/// Save audio settings to config file
+fn save_audio_settings(settings: &AudioSettings) -> Result<(), String> {
+    let config_path = get_audio_config_path();
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&config_path, json).map_err(|e| e.to_string())
+}
+
 /// Register a global hotkey
 fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &str) -> Result<(), String> {
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
@@ -678,7 +873,15 @@ pub fn run() {
     // Load hotkey settings
     let hotkey_settings = load_hotkey_settings();
 
-    // Create initial state with crash info and hotkey settings
+    // Load audio settings
+    let audio_settings = load_audio_settings();
+    let mut audio_recorder = AudioRecorder::new();
+    audio_recorder.update_settings(audio_settings.clone());
+
+    // Clean up old recordings on startup
+    let _ = AudioRecorder::cleanup_old_recordings();
+
+    // Create initial state with crash info, hotkey settings, and audio
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -686,6 +889,8 @@ pub fn run() {
         hotkey_settings: Mutex::new(hotkey_settings.clone()),
         hotkey_press_time: Mutex::new(None),
         is_recording: Mutex::new(false),
+        audio_recorder: Mutex::new(audio_recorder),
+        audio_settings: Mutex::new(audio_settings),
     };
 
     if had_crash {
@@ -752,7 +957,18 @@ pub fn run() {
             check_shortcut_available,
             get_recording_state,
             set_recording_state,
-            request_accessibility_permission
+            request_accessibility_permission,
+            // Audio commands (PROJ-3)
+            list_audio_devices,
+            get_audio_settings,
+            set_audio_settings,
+            start_audio_recording,
+            stop_audio_recording,
+            get_audio_level,
+            is_audio_recording,
+            check_audio_health,
+            delete_recording,
+            request_microphone_permission
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -43,7 +43,12 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "EverVoice benötigt Mikrofon-Zugriff für die Sprachaufnahme und Transkription.",
+        "NSAppleEventsUsageDescription": "EverVoice benötigt Zugriff für globale Tastenkombinationen."
+      }
     }
   },
   "plugins": {

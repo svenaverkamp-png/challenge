@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useAutostart } from '@/hooks/use-autostart'
 import { useTauri } from '@/hooks/use-tauri'
 import { HotkeySettings } from '@/components/hotkey-settings'
+import { MicrophoneSettings } from '@/components/microphone-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -18,6 +19,9 @@ export function SettingsPanel() {
     <div className="space-y-6">
       {/* Hotkey Settings - shown first as it's the primary feature */}
       <HotkeySettings />
+
+      {/* Microphone Settings (PROJ-3) */}
+      <MicrophoneSettings />
 
       {/* General Settings */}
       <Card>

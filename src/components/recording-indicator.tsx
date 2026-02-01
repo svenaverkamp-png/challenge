@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { useHotkey } from '@/hooks/use-hotkey'
+import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useTauri } from '@/hooks/use-tauri'
-import { Mic, Loader2 } from 'lucide-react'
+import { Mic, Loader2, Volume2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** Maximum recording time in milliseconds (6 minutes) */
@@ -28,6 +29,7 @@ interface RecordingIndicatorProps {
 export function RecordingIndicator({ compact = false, className }: RecordingIndicatorProps) {
   const { isTauri } = useTauri()
   const { recordingState, recordingDuration, settings } = useHotkey()
+  const { audioLevel } = useAudioRecording()
   const [showWarning, setShowWarning] = useState(false)
 
   // Check if we should show warning
@@ -70,6 +72,21 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
           <>
             <Mic className="h-3 w-3" />
             <span className="font-mono text-xs">{formatDuration(recordingDuration)}</span>
+            {/* Mini level indicator */}
+            <div className="flex items-center gap-0.5 ml-1">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'w-0.5 rounded-full transition-all',
+                    audioLevel > i * 33 ? 'bg-white' : 'bg-white/30',
+                    i === 0 && 'h-1',
+                    i === 1 && 'h-1.5',
+                    i === 2 && 'h-2'
+                  )}
+                />
+              ))}
+            </div>
           </>
         ) : (
           <>
@@ -121,6 +138,33 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
 
       {recordingState === 'recording' && (
         <>
+          {/* Audio Level Indicator */}
+          <div className="flex items-center gap-2 mb-3">
+            <Volume2 className="h-4 w-4 text-muted-foreground" />
+            <div className="flex-1 flex items-center gap-1">
+              {/* Level bars visualization */}
+              {Array.from({ length: 20 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'flex-1 h-4 rounded-sm transition-all',
+                    audioLevel > i * 5
+                      ? i < 12
+                        ? 'bg-green-500'
+                        : i < 16
+                        ? 'bg-yellow-500'
+                        : 'bg-red-500'
+                      : 'bg-muted/30'
+                  )}
+                />
+              ))}
+            </div>
+            <span className="text-xs text-muted-foreground w-8 text-right">
+              {audioLevel}%
+            </span>
+          </div>
+
+          {/* Time Progress */}
           <Progress
             value={progressPercent}
             className={cn(
@@ -139,6 +183,12 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
           {showWarning && (
             <p className="mt-2 text-xs text-yellow-600 font-medium">
               Noch 30 Sekunden verbleibend
+            </p>
+          )}
+          {/* Low audio warning */}
+          {audioLevel < 5 && recordingDuration > 3000 && (
+            <p className="mt-2 text-xs text-yellow-600 font-medium">
+              Mikrofon-Eingabe sehr leise. Bitte näher sprechen.
             </p>
           )}
         </>
