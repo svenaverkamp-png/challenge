@@ -1,6 +1,6 @@
 # PROJ-5: Floating Recording Overlay
 
-## Status: 🟢 Ready for E2E Testing (Critical Bugs gefixt)
+## Status: ✅ Deployed (2026-02-01)
 
 ## Beschreibung
 Ein schwebendes Mini-Fenster, das während der Aufnahme erscheint und dem User visuelles Feedback gibt. Zeigt Recording-Status, Pegel und Timer.
