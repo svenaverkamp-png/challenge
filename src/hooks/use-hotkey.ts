@@ -19,10 +19,17 @@ export interface HotkeySettings {
 /** Recording state for the hotkey system */
 export type RecordingState = 'idle' | 'recording' | 'processing'
 
+/** Recording result with file path */
+export interface RecordingStopResult {
+  file_path: string
+  duration_ms: number
+  privacy_mode: boolean
+}
+
 /** Events emitted by the hotkey system */
 export interface HotkeyEvents {
   onRecordingStart?: () => void
-  onRecordingStop?: () => void
+  onRecordingStop?: (result: RecordingStopResult) => void
   onRecordingCancel?: (reason: string) => void
 }
 
@@ -217,16 +224,17 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     if (isTauri) {
       try {
         await invoke('set_recording_state', { recording: false })
-        const result = await invoke<{ file_path: string; duration_ms: number; privacy_mode: boolean }>('stop_audio_recording')
+        const result = await invoke<RecordingStopResult>('stop_audio_recording')
         console.log('Recording saved to:', result.file_path)
-        // The file_path can be used by PROJ-4 (Whisper integration) for transcription
-        events?.onRecordingStop?.()
+        // Pass file_path to callback for PROJ-4 (Whisper transcription)
+        events?.onRecordingStop?.(result)
       } catch (err) {
         console.error('Failed to stop recording:', err)
         setError('Aufnahme konnte nicht gespeichert werden')
       }
     } else {
-      events?.onRecordingStop?.()
+      // Non-Tauri mode: pass dummy result
+      events?.onRecordingStop?.({ file_path: '', duration_ms: 0, privacy_mode: false })
     }
 
     // After processing is done, reset to idle

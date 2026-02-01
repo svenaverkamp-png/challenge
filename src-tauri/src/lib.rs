@@ -14,7 +14,13 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod audio;
+mod whisper;
+
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
+use whisper::{
+    DownloadProgress, ModelStatus, TranscriptionResult, WhisperError, WhisperLanguage,
+    WhisperManager, WhisperModel, WhisperSettings,
+};
 
 /// Hotkey mode: Push-to-Talk or Toggle
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -51,7 +57,7 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Managed state for current app status, crash detection, hotkey, and audio
+/// Managed state for current app status, crash detection, hotkey, audio, and whisper
 pub struct AppState {
     current_status: Mutex<AppStatus>,
     had_previous_crash: Mutex<bool>,
@@ -61,6 +67,9 @@ pub struct AppState {
     is_recording: Mutex<bool>,
     audio_recorder: Mutex<AudioRecorder>,
     audio_settings: Mutex<AudioSettings>,
+    // Whisper state (PROJ-4)
+    whisper_manager: Mutex<WhisperManager>,
+    whisper_settings: Mutex<WhisperSettings>,
 }
 
 impl Default for AppState {
@@ -74,6 +83,8 @@ impl Default for AppState {
             is_recording: Mutex::new(false),
             audio_recorder: Mutex::new(AudioRecorder::new()),
             audio_settings: Mutex::new(AudioSettings::default()),
+            whisper_manager: Mutex::new(WhisperManager::new()),
+            whisper_settings: Mutex::new(WhisperSettings::default()),
         }
     }
 }
@@ -578,6 +589,218 @@ fn save_audio_settings(settings: &AudioSettings) -> Result<(), String> {
     fs::write(&config_path, json).map_err(|e| e.to_string())
 }
 
+// ============================================================================
+// Whisper Commands (PROJ-4)
+// ============================================================================
+
+/// Get the path to the whisper config file
+fn get_whisper_config_path() -> PathBuf {
+    let app_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.evervoice.app");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join("whisper_config.json")
+}
+
+/// Load whisper settings from config file
+fn load_whisper_settings() -> WhisperSettings {
+    let config_path = get_whisper_config_path();
+    if config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    WhisperSettings::default()
+}
+
+/// Save whisper settings to config file
+fn save_whisper_settings(settings: &WhisperSettings) -> Result<(), String> {
+    let config_path = get_whisper_config_path();
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&config_path, json).map_err(|e| e.to_string())
+}
+
+/// Get current whisper settings
+#[tauri::command]
+async fn get_whisper_settings(state: State<'_, AppState>) -> Result<WhisperSettings, String> {
+    let settings = state.whisper_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update whisper settings
+#[tauri::command]
+async fn set_whisper_settings(
+    state: State<'_, AppState>,
+    settings: WhisperSettings,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.whisper_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Update manager
+    {
+        let mut manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+        manager.update_settings(settings.clone());
+    }
+
+    // Persist to config file
+    save_whisper_settings(&settings)?;
+
+    log::info!("Whisper settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Get status of all Whisper models
+#[tauri::command]
+async fn get_whisper_model_status(state: State<'_, AppState>) -> Result<Vec<ModelStatus>, String> {
+    let manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.get_all_model_status())
+}
+
+/// Download a Whisper model
+#[tauri::command]
+async fn download_whisper_model<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    model: WhisperModel,
+) -> Result<(), String> {
+    // Clone what we need for the async operation
+    let manager = {
+        let m = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+        // We need to create a new manager for async download since we can't hold the lock
+        // Actually, we'll use a simpler approach - download in the current context
+        drop(m);
+        WhisperManager::new()
+    };
+
+    log::info!("Starting download of Whisper model: {:?}", model);
+
+    // Start download
+    match manager.download_model(model).await {
+        Ok(()) => {
+            log::info!("Whisper model {} downloaded successfully", model.name());
+            let _ = app.emit("whisper-download-complete", model);
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Failed to download Whisper model: {}", e);
+            let _ = app.emit("whisper-download-error", e.to_string());
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Get current download progress
+#[tauri::command]
+async fn get_whisper_download_progress(
+    state: State<'_, AppState>,
+) -> Result<Option<DownloadProgress>, String> {
+    let manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.get_download_progress())
+}
+
+/// Cancel an ongoing model download
+#[tauri::command]
+async fn cancel_whisper_download(state: State<'_, AppState>) -> Result<(), String> {
+    let manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+    manager.cancel_download();
+    log::info!("Whisper model download cancelled");
+    Ok(())
+}
+
+/// Delete a downloaded model
+#[tauri::command]
+async fn delete_whisper_model(
+    state: State<'_, AppState>,
+    model: WhisperModel,
+) -> Result<(), String> {
+    // Unload if currently loaded
+    {
+        let mut manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+        manager.unload_model();
+    }
+
+    WhisperManager::delete_model(model).map_err(|e| e.to_string())?;
+    log::info!("Whisper model {} deleted", model.name());
+    Ok(())
+}
+
+/// Load a Whisper model into memory
+#[tauri::command]
+async fn load_whisper_model(state: State<'_, AppState>) -> Result<(), String> {
+    let mut manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+    manager.load_model().map_err(|e| e.to_string())
+}
+
+/// Unload the current Whisper model from memory
+#[tauri::command]
+async fn unload_whisper_model(state: State<'_, AppState>) -> Result<(), String> {
+    let mut manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+    manager.unload_model();
+    Ok(())
+}
+
+/// Check if a Whisper model is loaded
+#[tauri::command]
+async fn is_whisper_model_loaded(state: State<'_, AppState>) -> Result<bool, String> {
+    let manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.is_model_loaded())
+}
+
+/// Transcribe an audio file using Whisper
+/// SECURITY (BUG-4 fix): Only allows transcription of files within the recordings directory
+#[tauri::command]
+async fn transcribe_audio<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    wav_path: String,
+) -> Result<TranscriptionResult, String> {
+    // SECURITY (BUG-4 fix): Validate that the file is within the recordings directory
+    // This prevents path traversal attacks where an attacker could try to read arbitrary files
+    let recordings_dir = AudioRecorder::get_recordings_dir();
+    let path = PathBuf::from(&wav_path);
+
+    // Canonicalize paths to resolve any "../" or symlinks
+    let canonical_path = path.canonicalize()
+        .map_err(|e| format!("Invalid file path: {}", e))?;
+    let canonical_recordings_dir = recordings_dir.canonicalize()
+        .map_err(|e| format!("Failed to get recordings directory: {}", e))?;
+
+    // Validate path is within recordings directory
+    if !canonical_path.starts_with(&canonical_recordings_dir) {
+        log::warn!(
+            "Security: Blocked attempt to transcribe file outside recordings dir: {}",
+            wav_path
+        );
+        return Err("Access denied: File must be in recordings directory".to_string());
+    }
+
+    log::info!("Starting transcription of: {}", wav_path);
+
+    // Emit transcription started event
+    let _ = app.emit("transcription-started", &wav_path);
+
+    let result = {
+        let mut manager = state.whisper_manager.lock().map_err(|e| e.to_string())?;
+        manager.transcribe(&wav_path).map_err(|e| e.to_string())?
+    };
+
+    // Emit transcription complete event
+    let _ = app.emit("transcription-complete", &result);
+
+    log::info!(
+        "Transcription complete: {} characters, {}ms",
+        result.text.len(),
+        result.processing_time_ms
+    );
+
+    Ok(result)
+}
+
 /// Register a global hotkey
 fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &str) -> Result<(), String> {
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
@@ -881,7 +1104,12 @@ pub fn run() {
     // Clean up old recordings on startup
     let _ = AudioRecorder::cleanup_old_recordings();
 
-    // Create initial state with crash info, hotkey settings, and audio
+    // Load whisper settings (PROJ-4)
+    let whisper_settings = load_whisper_settings();
+    let mut whisper_manager = WhisperManager::new();
+    whisper_manager.update_settings(whisper_settings.clone());
+
+    // Create initial state with crash info, hotkey settings, audio, and whisper
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -891,6 +1119,8 @@ pub fn run() {
         is_recording: Mutex::new(false),
         audio_recorder: Mutex::new(audio_recorder),
         audio_settings: Mutex::new(audio_settings),
+        whisper_manager: Mutex::new(whisper_manager),
+        whisper_settings: Mutex::new(whisper_settings),
     };
 
     if had_crash {
@@ -968,7 +1198,19 @@ pub fn run() {
             is_audio_recording,
             check_audio_health,
             delete_recording,
-            request_microphone_permission
+            request_microphone_permission,
+            // Whisper commands (PROJ-4)
+            get_whisper_settings,
+            set_whisper_settings,
+            get_whisper_model_status,
+            download_whisper_model,
+            get_whisper_download_progress,
+            cancel_whisper_download,
+            delete_whisper_model,
+            load_whisper_model,
+            unload_whisper_model,
+            is_whisper_model_loaded,
+            transcribe_audio
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

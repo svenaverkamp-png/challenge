@@ -6,7 +6,8 @@ import { Progress } from '@/components/ui/progress'
 import { useHotkey } from '@/hooks/use-hotkey'
 import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useTauri } from '@/hooks/use-tauri'
-import { Mic, Loader2, Volume2 } from 'lucide-react'
+import { useWhisper } from '@/hooks/use-whisper'
+import { Mic, Loader2, Volume2, Brain, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /** Maximum recording time in milliseconds (6 minutes) */
@@ -30,7 +31,18 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
   const { isTauri } = useTauri()
   const { recordingState, recordingDuration, settings } = useHotkey()
   const { audioLevel } = useAudioRecording()
+  const { isTranscribing, lastTranscription } = useWhisper()
   const [showWarning, setShowWarning] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
+
+  // Show success briefly after transcription completes
+  useEffect(() => {
+    if (lastTranscription && !isTranscribing) {
+      setShowSuccess(true)
+      const timer = setTimeout(() => setShowSuccess(false), 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [lastTranscription, isTranscribing])
 
   // Check if we should show warning
   useEffect(() => {
@@ -41,9 +53,28 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
     }
   }, [recordingState, recordingDuration])
 
-  // Don't show if not in Tauri or idle
-  if (!isTauri || recordingState === 'idle') {
+  // Determine effective state (include transcription state)
+  const effectiveState = isTranscribing ? 'transcribing' : recordingState
+
+  // Don't show if not in Tauri or idle (unless showing success)
+  if (!isTauri || (effectiveState === 'idle' && !showSuccess)) {
     return null
+  }
+
+  // Show success state briefly
+  if (showSuccess && effectiveState === 'idle') {
+    return (
+      <Badge
+        variant="default"
+        className={cn(
+          'gap-1.5 bg-green-500 hover:bg-green-600',
+          className
+        )}
+      >
+        <CheckCircle2 className="h-3 w-3" />
+        <span className="text-xs">Transkription fertig!</span>
+      </Badge>
+    )
   }
 
   // Format duration as MM:SS
@@ -60,15 +91,16 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
   if (compact) {
     return (
       <Badge
-        variant={recordingState === 'recording' ? 'default' : 'secondary'}
+        variant={effectiveState === 'recording' ? 'default' : 'secondary'}
         className={cn(
           'gap-1.5 transition-colors',
-          recordingState === 'recording' && 'bg-red-500 hover:bg-red-600',
+          effectiveState === 'recording' && 'bg-red-500 hover:bg-red-600',
+          effectiveState === 'transcribing' && 'bg-purple-500 hover:bg-purple-600',
           showWarning && 'animate-pulse bg-yellow-500 hover:bg-yellow-600',
           className
         )}
       >
-        {recordingState === 'recording' ? (
+        {effectiveState === 'recording' ? (
           <>
             <Mic className="h-3 w-3" />
             <span className="font-mono text-xs">{formatDuration(recordingDuration)}</span>
@@ -88,6 +120,11 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
               ))}
             </div>
           </>
+        ) : effectiveState === 'transcribing' ? (
+          <>
+            <Brain className="h-3 w-3 animate-pulse" />
+            <span className="text-xs">Transkribiere...</span>
+          </>
         ) : (
           <>
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -102,15 +139,16 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
     <div
       className={cn(
         'rounded-lg border p-4 transition-colors',
-        recordingState === 'recording' && 'border-red-500/50 bg-red-500/10',
-        recordingState === 'processing' && 'border-blue-500/50 bg-blue-500/10',
+        effectiveState === 'recording' && 'border-red-500/50 bg-red-500/10',
+        effectiveState === 'processing' && 'border-blue-500/50 bg-blue-500/10',
+        effectiveState === 'transcribing' && 'border-purple-500/50 bg-purple-500/10',
         showWarning && 'border-yellow-500/50 bg-yellow-500/10',
         className
       )}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          {recordingState === 'recording' ? (
+          {effectiveState === 'recording' ? (
             <>
               <div
                 className={cn(
@@ -122,6 +160,11 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
                 Aufnahme aktiv
               </span>
             </>
+          ) : effectiveState === 'transcribing' ? (
+            <>
+              <Brain className="h-4 w-4 animate-pulse text-purple-500" />
+              <span className="text-sm font-medium">Transkribiere mit Whisper...</span>
+            </>
           ) : (
             <>
               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
@@ -129,14 +172,14 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
             </>
           )}
         </div>
-        {recordingState === 'recording' && (
+        {effectiveState === 'recording' && (
           <span className="font-mono text-lg tabular-nums">
             {formatDuration(recordingDuration)}
           </span>
         )}
       </div>
 
-      {recordingState === 'recording' && (
+      {effectiveState === 'recording' && (
         <>
           {/* Audio Level Indicator */}
           <div className="flex items-center gap-2 mb-3">
@@ -192,6 +235,20 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
             </p>
           )}
         </>
+      )}
+
+      {/* Transcription status */}
+      {effectiveState === 'transcribing' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1.5 bg-purple-500/20 rounded-full overflow-hidden">
+              <div className="h-full bg-purple-500 rounded-full animate-pulse w-full" />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Audio wird lokal mit Whisper transkribiert...
+          </p>
+        </div>
       )}
     </div>
   )

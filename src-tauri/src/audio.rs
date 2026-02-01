@@ -185,7 +185,7 @@ impl AudioRecorder {
     }
 
     /// Get the recordings directory
-    fn get_recordings_dir() -> PathBuf {
+    pub fn get_recordings_dir() -> PathBuf {
         let app_dir = dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("com.evervoice.app")

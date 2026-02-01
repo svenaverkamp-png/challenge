@@ -9,30 +9,92 @@ import { RecordingIndicator } from '@/components/recording-indicator'
 import { AccessibilityPermissionDialog } from '@/components/accessibility-permission-dialog'
 import { MicrophonePermissionDialog } from '@/components/microphone-permission-dialog'
 import { useAppStatus } from '@/hooks/use-app-status'
-import { useHotkey } from '@/hooks/use-hotkey'
+import { useHotkey, RecordingStopResult } from '@/hooks/use-hotkey'
+import { useWhisper } from '@/hooks/use-whisper'
 import { useTauri } from '@/hooks/use-tauri'
 import { invoke } from '@tauri-apps/api/core'
-import { Mic, X } from 'lucide-react'
+import { toast } from 'sonner'
+import { Mic, X, Copy, Check, Brain } from 'lucide-react'
 
 export default function Home() {
   const { status, errorMessage, setStatus } = useAppStatus()
   const { isTauri } = useTauri()
 
+  // Whisper integration (PROJ-4)
+  const {
+    transcribe,
+    isTranscribing,
+    lastTranscription,
+    modelStatus,
+    settings: whisperSettings,
+  } = useWhisper()
+
+  // State for transcription result display
+  const [transcriptionText, setTranscriptionText] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
   // Hotkey integration - sync recording state with app status
   const handleRecordingStart = useCallback(() => {
     setStatus('recording')
+    setTranscriptionText(null) // Clear previous transcription
   }, [setStatus])
 
-  const handleRecordingStop = useCallback(() => {
+  const handleRecordingStop = useCallback(async (result: RecordingStopResult) => {
     setStatus('processing')
-    // TODO: This will be replaced with actual transcription processing
-    setTimeout(() => setStatus('idle'), 2000)
-  }, [setStatus])
+
+    // Check if Whisper model is downloaded
+    const currentModelStatus = modelStatus.find(s => s.model === whisperSettings.model)
+
+    if (!currentModelStatus?.downloaded) {
+      toast.warning('Kein Whisper-Modell', {
+        description: 'Bitte laden Sie ein Modell in den Einstellungen herunter.',
+      })
+      setStatus('idle')
+      return
+    }
+
+    // Start transcription (PROJ-4)
+    if (result.file_path && isTauri) {
+      try {
+        const transcriptionResult = await transcribe(result.file_path)
+        if (transcriptionResult?.text) {
+          setTranscriptionText(transcriptionResult.text)
+          toast.success('Transkription fertig', {
+            description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+          })
+        } else {
+          toast.info('Keine Sprache erkannt', {
+            description: 'Bitte versuche es erneut.',
+          })
+        }
+      } catch (err) {
+        console.error('Transcription failed:', err)
+        toast.error('Transkription fehlgeschlagen')
+      }
+    }
+
+    setStatus('idle')
+  }, [setStatus, transcribe, modelStatus, whisperSettings.model, isTauri])
 
   const handleRecordingCancel = useCallback((reason: string) => {
     setStatus('idle')
     console.log('Recording cancelled:', reason)
   }, [setStatus])
+
+  // Copy transcription to clipboard
+  const copyToClipboard = useCallback(async () => {
+    if (!transcriptionText) return
+
+    try {
+      await navigator.clipboard.writeText(transcriptionText)
+      setCopied(true)
+      toast.success('In Zwischenablage kopiert')
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+      toast.error('Kopieren fehlgeschlagen')
+    }
+  }, [transcriptionText])
 
   // Initialize hotkey with event handlers
   const {
@@ -182,6 +244,61 @@ export default function Home() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Transcription Result (PROJ-4) */}
+        {(transcriptionText || isTranscribing) && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-lg font-light">
+                <div className="flex items-center gap-2">
+                  <Brain className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">Transkription</span>
+                </div>
+                {transcriptionText && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={copyToClipboard}
+                    className="h-8 gap-1.5"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-green-500" />
+                        <span className="text-xs">Kopiert</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        <span className="text-xs">Kopieren</span>
+                      </>
+                    )}
+                  </Button>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isTranscribing ? (
+                <div className="flex items-center gap-3 py-4">
+                  <div className="h-4 w-4 rounded-full bg-purple-500 animate-pulse" />
+                  <span className="text-sm text-muted-foreground">
+                    Wird mit Whisper transkribiert...
+                  </span>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                    {transcriptionText}
+                  </p>
+                  {lastTranscription && (
+                    <p className="text-xs text-muted-foreground">
+                      Sprache: {lastTranscription.language} · {lastTranscription.segments.length} Segment(e) · {(lastTranscription.processing_time_ms / 1000).toFixed(1)}s
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Settings */}
         <SettingsPanel />

@@ -34,3 +34,10 @@ rubato = "0.15"
 uuid = { version = "1.8", features = ["v4"] }
 thiserror = "1.0"
 fs2 = "0.4"  # For disk space checking (BUG-3 fix)
+
+# Whisper.cpp integration dependencies (PROJ-4)
+whisper-rs = "0.11"  # Rust bindings for whisper.cpp
+reqwest = { version = "0.11", features = ["stream"] }  # HTTP downloads with progress
+sha2 = "0.10"  # Hash verification for downloaded models
+futures-util = "0.3"  # For async stream processing
+tokio = { version = "1", features = ["sync", "fs"] }  # Async runtime for downloads

@@ -9,6 +9,7 @@ import { useAutostart } from '@/hooks/use-autostart'
 import { useTauri } from '@/hooks/use-tauri'
 import { HotkeySettings } from '@/components/hotkey-settings'
 import { MicrophoneSettings } from '@/components/microphone-settings'
+import { WhisperSettings } from '@/components/whisper-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -22,6 +23,9 @@ export function SettingsPanel() {
 
       {/* Microphone Settings (PROJ-3) */}
       <MicrophoneSettings />
+
+      {/* Whisper Settings (PROJ-4) */}
+      <WhisperSettings />
 
       {/* General Settings */}
       <Card>
