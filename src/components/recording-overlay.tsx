@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { Mic, Loader2, CheckCircle2, XCircle, Brain } from 'lucide-react'
+import { Mic, Loader2, CheckCircle2, XCircle, Brain, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTauri } from '@/hooks/use-tauri'
 
@@ -14,7 +14,7 @@ const MAX_RECORDING_TIME = 6 * 60 * 1000
 const WARNING_TIME = 5.5 * 60 * 1000
 
 /** Overlay status states */
-type OverlayStatus = 'idle' | 'recording' | 'processing' | 'transcribing' | 'done' | 'error' | 'cancelled'
+type OverlayStatus = 'idle' | 'recording' | 'processing' | 'transcribing' | 'improving' | 'done' | 'error' | 'cancelled'
 
 /** Event payloads */
 interface AudioLevelPayload {
@@ -126,6 +126,18 @@ export function RecordingOverlay() {
         setStatus('transcribing')
       })
       unlisteners.push(unlistenTranscribingFallback)
+
+      // PROJ-7: AI improving (Ollama)
+      const unlistenImproving = await listen('overlay-improving', () => {
+        setStatus('improving')
+      })
+      unlisteners.push(unlistenImproving)
+
+      // Fallback: listen to ollama-processing-started
+      const unlistenImprovingFallback = await listen('ollama-processing-started', () => {
+        setStatus('improving')
+      })
+      unlisteners.push(unlistenImprovingFallback)
 
       // Processing/transcription done
       const unlistenDone = await listen('overlay-done', () => {
@@ -300,6 +312,16 @@ function StatusIndicator({ status }: { status: OverlayStatus }) {
         </motion.div>
       )
 
+    case 'improving':
+      return (
+        <motion.div
+          animate={{ rotate: [0, 360] }}
+          transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+        >
+          <Sparkles className="h-5 w-5 text-amber-400" />
+        </motion.div>
+      )
+
     case 'done':
       return (
         <motion.div
@@ -346,6 +368,8 @@ function StatusText({ status, errorMessage }: { status: OverlayStatus; errorMess
         return 'Verarbeite...'
       case 'transcribing':
         return 'Transkribiere...'
+      case 'improving':
+        return 'Verbessern...'
       case 'done':
         return 'Fertig!'
       case 'error':
@@ -365,6 +389,8 @@ function StatusText({ status, errorMessage }: { status: OverlayStatus; errorMess
         return 'text-blue-300'
       case 'transcribing':
         return 'text-purple-300'
+      case 'improving':
+        return 'text-amber-300'
       case 'done':
         return 'text-green-300'
       case 'error':

@@ -13,6 +13,7 @@ import { useHotkey, RecordingStopResult } from '@/hooks/use-hotkey'
 import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useWhisper } from '@/hooks/use-whisper'
 import { useTextInsert } from '@/hooks/use-text-insert'
+import { useOllama } from '@/hooks/use-ollama'
 import { useTauri } from '@/hooks/use-tauri'
 import { useOverlayWindow } from '@/hooks/use-overlay-window'
 import { invoke } from '@tauri-apps/api/core'
@@ -32,6 +33,7 @@ export default function Home() {
     notifyRecordingStopped,
     notifyAudioLevel,
     notifyTranscribing,
+    notifyImproving,
     notifyDone,
     notifyError,
     notifyCancelled,
@@ -53,8 +55,13 @@ export default function Home() {
   const {
     insertText,
     settings: textInsertSettings,
-    isInserting,
   } = useTextInsert()
+
+  // Ollama integration (PROJ-7)
+  const {
+    improveText,
+    settings: ollamaSettings,
+  } = useOllama()
 
   // State for transcription result display
   const [transcriptionText, setTranscriptionText] = useState<string | null>(null)
@@ -93,27 +100,55 @@ export default function Home() {
 
         const transcriptionResult = await transcribe(result.file_path)
         if (transcriptionResult?.text) {
-          setTranscriptionText(transcriptionResult.text)
+          let finalText = transcriptionResult.text
+          let totalProcessingTime = transcriptionResult.processing_time_ms
+
+          // PROJ-7: Improve text with Ollama (Auto-Edit)
+          if (ollamaSettings.enabled) {
+            // Notify overlay that AI improvement is starting
+            notifyImproving()
+            try {
+              const improveResult = await improveText(
+                transcriptionResult.text,
+                transcriptionResult.language
+              )
+              if (improveResult?.was_edited && improveResult.edited_text) {
+                finalText = improveResult.edited_text
+                totalProcessingTime += improveResult.processing_time_ms
+              } else if (improveResult?.error) {
+                // Ollama failed - use original text, show warning
+                console.warn('Ollama auto-edit failed:', improveResult.error)
+                toast.warning('AI-Bearbeitung fehlgeschlagen', {
+                  description: 'Rohtext wird verwendet.',
+                })
+              }
+            } catch (ollamaErr) {
+              console.warn('Ollama error:', ollamaErr)
+              // Continue with original text
+            }
+          }
+
+          setTranscriptionText(finalText)
 
           // PROJ-6: Automatically insert text into active text field
           if (textInsertSettings.enabled) {
-            const insertResult = await insertText(transcriptionResult.text)
+            const insertResult = await insertText(finalText)
             if (insertResult?.success) {
               toast.success('Text eingefuegt', {
-                description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+                description: `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`,
               })
             } else if (insertResult?.in_clipboard) {
               // Fallback to clipboard - toast already shown by hook
             } else {
               // Show transcription success even if insert failed
               toast.success('Transkription fertig', {
-                description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+                description: `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`,
               })
             }
           } else {
             // Text insert disabled - just show transcription success
             toast.success('Transkription fertig', {
-              description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
+              description: `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`,
             })
           }
 
@@ -138,7 +173,7 @@ export default function Home() {
     }
 
     setStatus('idle')
-  }, [setStatus, transcribe, insertText, textInsertSettings.enabled, modelStatus, whisperSettings.model, isTauri, notifyRecordingStopped, notifyTranscribing, notifyDone, notifyError])
+  }, [setStatus, transcribe, improveText, ollamaSettings.enabled, insertText, textInsertSettings.enabled, modelStatus, whisperSettings.model, isTauri, notifyRecordingStopped, notifyTranscribing, notifyImproving, notifyDone, notifyError])
 
   const handleRecordingCancel = useCallback((reason: string) => {
     setStatus('idle')

@@ -14,10 +14,12 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod audio;
+mod ollama;
 mod text_insert;
 mod whisper;
 
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
+use ollama::{AutoEditResult, OllamaManager, OllamaSettings, OllamaStatus};
 use text_insert::{InsertMethod, TextInsertResult, TextInsertSettings};
 use whisper::{
     DownloadProgress, ModelStatus, TranscriptionResult, WhisperError, WhisperLanguage,
@@ -59,7 +61,7 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Managed state for current app status, crash detection, hotkey, audio, whisper, and text insert
+/// Managed state for current app status, crash detection, hotkey, audio, whisper, ollama, and text insert
 pub struct AppState {
     current_status: Mutex<AppStatus>,
     had_previous_crash: Mutex<bool>,
@@ -74,6 +76,9 @@ pub struct AppState {
     whisper_settings: Mutex<WhisperSettings>,
     // Text insert state (PROJ-6)
     text_insert_settings: Mutex<TextInsertSettings>,
+    // Ollama state (PROJ-7)
+    ollama_manager: Mutex<OllamaManager>,
+    ollama_settings: Mutex<OllamaSettings>,
 }
 
 impl Default for AppState {
@@ -90,6 +95,8 @@ impl Default for AppState {
             whisper_manager: Mutex::new(WhisperManager::new()),
             whisper_settings: Mutex::new(WhisperSettings::default()),
             text_insert_settings: Mutex::new(TextInsertSettings::default()),
+            ollama_manager: Mutex::new(OllamaManager::new()),
+            ollama_settings: Mutex::new(OllamaSettings::default()),
         }
     }
 }
@@ -901,6 +908,140 @@ async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     text_insert::copy_to_clipboard(&text).map_err(|e| e.to_string())
 }
 
+// ============================================================================
+// Ollama Commands (PROJ-7)
+// ============================================================================
+
+/// Get current ollama settings
+#[tauri::command]
+async fn get_ollama_settings(state: State<'_, AppState>) -> Result<OllamaSettings, String> {
+    let settings = state.ollama_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update ollama settings
+#[tauri::command]
+async fn set_ollama_settings(
+    state: State<'_, AppState>,
+    settings: OllamaSettings,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.ollama_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Update manager
+    {
+        let mut manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+        manager.update_settings(settings.clone());
+    }
+
+    // Persist to config file
+    ollama::save_settings(&settings)?;
+
+    log::info!("Ollama settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Check Ollama connection status and model availability
+#[tauri::command]
+async fn check_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus, String> {
+    let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.check_status().await)
+}
+
+/// Improve text using Ollama (auto-edit)
+/// This is the main entry point for PROJ-7 text improvement
+#[tauri::command]
+async fn improve_text<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    text: String,
+    language: String,
+) -> Result<AutoEditResult, String> {
+    let settings = {
+        let s = state.ollama_settings.lock().map_err(|e| e.to_string())?;
+        s.clone()
+    };
+
+    if !settings.enabled {
+        log::debug!("Ollama auto-edit disabled, returning original text");
+        return Ok(AutoEditResult {
+            edited_text: text.clone(),
+            original_text: text,
+            was_edited: false,
+            processing_time_ms: 0,
+            error: None,
+        });
+    }
+
+    log::info!("Starting Ollama text improvement: {} chars", text.len());
+
+    // Emit processing started event
+    let _ = app.emit("ollama-processing-started", &text);
+
+    let result = {
+        let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+        manager.improve_text(&text, &language).await
+    };
+
+    match result {
+        Ok(edit_result) => {
+            let _ = app.emit("ollama-processing-complete", &edit_result);
+            log::info!(
+                "Ollama text improvement complete: {}ms, {} -> {} chars",
+                edit_result.processing_time_ms,
+                edit_result.original_text.len(),
+                edit_result.edited_text.len()
+            );
+            Ok(edit_result)
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            log::warn!("Ollama text improvement failed: {}", error_msg);
+
+            // Emit error event
+            let _ = app.emit("ollama-processing-error", &error_msg);
+
+            // Return fallback result with original text
+            Ok(AutoEditResult {
+                edited_text: text.clone(),
+                original_text: text,
+                was_edited: false,
+                processing_time_ms: 0,
+                error: Some(error_msg),
+            })
+        }
+    }
+}
+
+/// Pull (download) an Ollama model
+#[tauri::command]
+async fn pull_ollama_model<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<(), String> {
+    log::info!("Starting Ollama model pull: {}", model);
+
+    let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+
+    match manager.pull_model(&model).await {
+        Ok(()) => {
+            let _ = app.emit("ollama-model-pull-started", &model);
+            log::info!("Ollama model pull started: {}", model);
+            Ok(())
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            log::error!("Ollama model pull failed: {}", error_msg);
+            let _ = app.emit("ollama-model-pull-error", &error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
 /// Register a global hotkey
 fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &str) -> Result<(), String> {
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
@@ -1212,7 +1353,12 @@ pub fn run() {
     // Load text insert settings (PROJ-6)
     let text_insert_settings = text_insert::load_settings();
 
-    // Create initial state with crash info, hotkey settings, audio, whisper, and text insert
+    // Load ollama settings (PROJ-7)
+    let ollama_settings = ollama::load_settings();
+    let mut ollama_manager = OllamaManager::new();
+    ollama_manager.update_settings(ollama_settings.clone());
+
+    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, and text insert
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -1225,6 +1371,8 @@ pub fn run() {
         whisper_manager: Mutex::new(whisper_manager),
         whisper_settings: Mutex::new(whisper_settings),
         text_insert_settings: Mutex::new(text_insert_settings),
+        ollama_manager: Mutex::new(ollama_manager),
+        ollama_settings: Mutex::new(ollama_settings),
     };
 
     if had_crash {
@@ -1319,7 +1467,13 @@ pub fn run() {
             get_text_insert_settings,
             set_text_insert_settings,
             insert_text,
-            copy_text_to_clipboard
+            copy_text_to_clipboard,
+            // Ollama commands (PROJ-7)
+            get_ollama_settings,
+            set_ollama_settings,
+            check_ollama_status,
+            improve_text,
+            pull_ollama_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -11,6 +11,7 @@ import { HotkeySettings } from '@/components/hotkey-settings'
 import { MicrophoneSettings } from '@/components/microphone-settings'
 import { WhisperSettings } from '@/components/whisper-settings'
 import { TextInsertSettings } from '@/components/text-insert-settings'
+import { OllamaSettings } from '@/components/ollama-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -30,6 +31,9 @@ export function SettingsPanel() {
 
       {/* Text Insert Settings (PROJ-6) */}
       <TextInsertSettings />
+
+      {/* AI Auto-Edit Settings (PROJ-7) */}
+      <OllamaSettings />
 
       {/* General Settings */}
       <Card>

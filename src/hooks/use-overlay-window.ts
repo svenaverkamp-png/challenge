@@ -28,6 +28,8 @@ interface UseOverlayWindowReturn {
   notifyAudioLevel: (level: number) => Promise<void>
   /** Send transcription started event to overlay */
   notifyTranscribing: () => Promise<void>
+  /** Send AI improving event to overlay (PROJ-7) */
+  notifyImproving: () => Promise<void>
   /** Send done event to overlay */
   notifyDone: () => Promise<void>
   /** Send error event to overlay */
@@ -189,6 +191,19 @@ export function useOverlayWindow(): UseOverlayWindowReturn {
   }, [isTauri])
 
   /**
+   * Send AI improving event to overlay (PROJ-7: Ollama auto-edit)
+   */
+  const notifyImproving = useCallback(async () => {
+    if (!isTauri) return
+
+    try {
+      await emit('overlay-improving', {})
+    } catch (error) {
+      console.error('Failed to notify improving:', error)
+    }
+  }, [isTauri])
+
+  /**
    * Send done event to overlay
    */
   const notifyDone = useCallback(async () => {
@@ -237,6 +252,7 @@ export function useOverlayWindow(): UseOverlayWindowReturn {
     notifyRecordingStopped,
     notifyAudioLevel,
     notifyTranscribing,
+    notifyImproving,
     notifyDone,
     notifyError,
     notifyCancelled

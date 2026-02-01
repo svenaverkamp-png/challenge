@@ -45,3 +45,6 @@ tokio = { version = "1", features = ["sync", "fs"] }  # Async runtime for downlo
 # Text Insert dependencies (PROJ-6)
 arboard = "3"  # Cross-platform clipboard (better than clipboard crate)
 enigo = "0.2"  # Cross-platform keyboard simulation
+
+# Ollama dependencies (PROJ-7)
+url = "2.5"  # URL parsing and validation for SSRF protection
