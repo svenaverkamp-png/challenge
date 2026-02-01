@@ -19,7 +19,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { toast } from 'sonner'
+import { showSuccess, showErrorByCode } from '@/lib/app-error'
 import {
   Settings,
   Keyboard,
@@ -102,14 +102,12 @@ export default function SettingsPage() {
 
       if (filePath) {
         await writeTextFile(filePath, config)
-        toast.success('Einstellungen exportiert', {
-          description: `Gespeichert unter: ${filePath}`,
-        })
+        showSuccess('Einstellungen exportiert', `Gespeichert unter: ${filePath}`)
       }
     } catch (err) {
       console.error('Export failed:', err)
-      toast.error('Export fehlgeschlagen', {
-        description: 'Die Einstellungen konnten nicht exportiert werden.',
+      showErrorByCode('ERR_EXPORT', 'settings', {
+        details: 'Die Einstellungen konnten nicht exportiert werden.',
       })
     } finally {
       setIsExporting(false)
@@ -139,17 +137,15 @@ export default function SettingsPage() {
         }
 
         await invoke('import_all_settings', { config: content })
-        toast.success('Einstellungen importiert', {
-          description: 'Die Konfiguration wurde geladen. Einige Aenderungen erfordern einen Neustart.',
-        })
+        showSuccess('Einstellungen importiert', 'Die Konfiguration wurde geladen. Einige Aenderungen erfordern einen Neustart.')
 
         // Reload the page to reflect new settings
         window.location.reload()
       }
     } catch (err) {
       console.error('Import failed:', err)
-      toast.error('Import fehlgeschlagen', {
-        description: 'Bitte waehlen Sie eine gueltige JSON-Konfigurationsdatei.',
+      showErrorByCode('ERR_IMPORT', 'settings', {
+        details: 'Bitte waehlen Sie eine gueltige JSON-Konfigurationsdatei.',
       })
     } finally {
       setIsImporting(false)
@@ -162,14 +158,12 @@ export default function SettingsPage() {
 
     try {
       await invoke('reset_category_settings', { category })
-      toast.success('Einstellungen zurueckgesetzt', {
-        description: `${CATEGORIES.find(c => c.id === category)?.label}-Einstellungen wurden auf Standard zurueckgesetzt.`,
-      })
+      showSuccess('Einstellungen zurueckgesetzt', `${CATEGORIES.find(c => c.id === category)?.label}-Einstellungen wurden auf Standard zurueckgesetzt.`)
       // Reload to reflect changes
       window.location.reload()
     } catch (err) {
       console.error('Reset failed:', err)
-      toast.error('Zuruecksetzen fehlgeschlagen')
+      showErrorByCode('ERR_SETTINGS_RESET', 'settings')
     }
   }
 

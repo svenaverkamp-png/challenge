@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useTauri } from './use-tauri'
+import { showErrorByCode } from '@/lib/app-error'
 
 /** Available Whisper models */
 export type WhisperModel = 'Tiny' | 'Small' | 'Medium'
@@ -206,7 +207,10 @@ export function useWhisper(): UseWhisperReturn {
       const unlistenDownloadError = await listen<string>('whisper-download-error', (event) => {
         setError(event.payload)
         setDownloadProgress(null)
-        toast.error('Download fehlgeschlagen', { description: event.payload })
+        showErrorByCode('ERR_WHISPER_DOWNLOAD', 'whisper', {
+          details: event.payload,
+          action: () => downloadModel(settings.model),
+        })
       })
       unlisteners.push(unlistenDownloadError)
 
@@ -415,7 +419,10 @@ export function useWhisper(): UseWhisperReturn {
           err instanceof Error ? err.message : 'Transkription fehlgeschlagen'
         setError(message)
         setIsTranscribing(false)
-        toast.error('Transkription fehlgeschlagen', { description: message })
+        showErrorByCode('ERR_TRANSCRIPTION_FAILED', 'whisper', {
+          details: message,
+          action: async () => { await transcribe(wavPath) },
+        })
         return null
       }
     },

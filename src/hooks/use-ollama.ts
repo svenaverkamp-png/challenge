@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useTauri } from './use-tauri'
+import { showErrorByCode, showWarning } from '@/lib/app-error'
 
 /** Ollama settings from backend */
 export interface OllamaSettings {
@@ -153,23 +154,16 @@ export function useOllama(): UseOllamaReturn {
           // BUG-3 & BUG-7 fix: Show specific error messages based on error type
           const errorMsg = event.payload.toLowerCase()
           if (errorMsg.includes('timeout')) {
-            // BUG-7 fix: Specific timeout message
-            toast.warning('AI-Bearbeitung zu langsam', {
-              description: 'Rohtext wird verwendet. Versuche ein kleineres Modell.',
-            })
+            showWarning('AI-Bearbeitung zu langsam', 'Rohtext wird verwendet. Versuche ein kleineres Modell.')
           } else if (errorMsg.includes('not reachable') || errorMsg.includes('connection')) {
-            // BUG-3 fix: Specific "not available" message
-            toast.warning('AI-Bearbeitung nicht verfuegbar', {
-              description: 'Ollama laeuft nicht. Rohtext wird verwendet.',
-            })
+            showWarning('AI-Bearbeitung nicht verfuegbar', 'Ollama laeuft nicht. Rohtext wird verwendet.')
           } else if (errorMsg.includes('invalid url')) {
-            // SEC-1 fix: URL validation error
-            toast.error('Ungueltige Ollama URL', {
-              description: 'Nur localhost URLs sind erlaubt.',
+            showErrorByCode('ERR_OLLAMA_INVALID_URL', 'ollama', {
+              details: 'Nur localhost URLs sind erlaubt.',
             })
           } else {
-            toast.error('AI-Bearbeitung fehlgeschlagen', {
-              description: event.payload,
+            showErrorByCode('ERR_OLLAMA_UNREACHABLE', 'ollama', {
+              details: event.payload,
             })
           }
         }
@@ -191,8 +185,9 @@ export function useOllama(): UseOllamaReturn {
       const unlistenPullError = await listen<string>(
         'ollama-model-pull-error',
         (event) => {
-          toast.error('Modell-Download fehlgeschlagen', {
-            description: event.payload,
+          showErrorByCode('ERR_WHISPER_DOWNLOAD', 'ollama', {
+            details: event.payload,
+            action: () => pullModel(settings.model),
           })
         }
       )
@@ -298,16 +293,12 @@ export function useOllama(): UseOllamaReturn {
         // BUG-3 & BUG-7 fix: Show specific error toasts
         const errorMsg = message.toLowerCase()
         if (errorMsg.includes('timeout')) {
-          toast.warning('AI-Bearbeitung zu langsam', {
-            description: 'Rohtext wird verwendet.',
-          })
+          showWarning('AI-Bearbeitung zu langsam', 'Rohtext wird verwendet.')
         } else if (errorMsg.includes('not reachable') || errorMsg.includes('connection')) {
-          toast.warning('AI-Bearbeitung nicht verfuegbar', {
-            description: 'Ollama laeuft nicht. Rohtext wird verwendet.',
-          })
+          showWarning('AI-Bearbeitung nicht verfuegbar', 'Ollama laeuft nicht. Rohtext wird verwendet.')
         } else if (errorMsg.includes('invalid url')) {
-          toast.error('Ungueltige Ollama URL', {
-            description: 'Nur localhost URLs sind erlaubt.',
+          showErrorByCode('ERR_OLLAMA_INVALID_URL', 'ollama', {
+            details: 'Nur localhost URLs sind erlaubt.',
           })
         }
         // Note: Don't show generic error toast here to avoid duplicate toasts
@@ -335,7 +326,10 @@ export function useOllama(): UseOllamaReturn {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Modell konnte nicht heruntergeladen werden'
-        toast.error('Download fehlgeschlagen', { description: message })
+        showErrorByCode('ERR_WHISPER_DOWNLOAD', 'ollama', {
+          details: message,
+          action: () => pullModel(model),
+        })
         throw err
       }
     },

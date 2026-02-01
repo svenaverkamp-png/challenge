@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { toast } from 'sonner'
 import { useTauri } from './use-tauri'
+import { showErrorByCode, showWarning, showInfo } from '@/lib/app-error'
 
 /** Hotkey mode: Push-to-Talk or Toggle */
 export type HotkeyMode = 'PushToTalk' | 'Toggle'
@@ -26,10 +26,24 @@ export interface RecordingStopResult {
   privacy_mode: boolean
 }
 
+/** App category for context-aware processing (PROJ-8) */
+export type AppCategory = 'email' | 'chat' | 'social' | 'code' | 'docs' | 'browser' | 'notes' | 'terminal' | 'remote_desktop' | 'other'
+
+/** Application context detected at recording start (PROJ-8) */
+export interface AppContext {
+  app_name: string
+  bundle_id?: string
+  process_name?: string
+  window_title: string
+  category: AppCategory
+}
+
 /** Events emitted by the hotkey system */
 export interface HotkeyEvents {
-  onRecordingStart?: () => void
-  onRecordingStop?: (result: RecordingStopResult) => void
+  /** Called when recording starts. Receives AppContext if detected (PROJ-8/PROJ-9) */
+  onRecordingStart?: (context?: AppContext) => void
+  /** Called when recording stops. Receives result and AppContext for context-aware processing */
+  onRecordingStop?: (result: RecordingStopResult, context?: AppContext) => void
   onRecordingCancel?: (reason: string) => void
 }
 
@@ -56,6 +70,8 @@ interface UseHotkeyReturn {
   recordingStartTime: number | null
   /** Time elapsed since recording started (in ms) */
   recordingDuration: number
+  /** Current app context detected at recording start (PROJ-8/PROJ-9) */
+  currentContext: AppContext | null
 }
 
 /** Default hotkey settings */
@@ -87,6 +103,8 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
   const [recordingDuration, setRecordingDuration] = useState(0)
   const [accessibilityPermissionRequired, setAccessibilityPermissionRequired] = useState(false)
   const [maxDurationMinutes, setMaxDurationMinutes] = useState(DEFAULT_MAX_DURATION_MINUTES)
+  // PROJ-8/PROJ-9: Store detected app context at recording start
+  const [currentContext, setCurrentContext] = useState<AppContext | null>(null)
 
   // Refs for debouncing and timeout
   const lastToggleRef = useRef<number>(0)
@@ -94,6 +112,8 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
   const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // PROJ-8/PROJ-9: Ref to access current context in callbacks
+  const currentContextRef = useRef<AppContext | null>(null)
 
   // Load settings on mount
   useEffect(() => {
@@ -122,7 +142,8 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
   }, [isTauri])
 
   // Start recording handler
-  const startRecording = useCallback(async () => {
+  // PROJ-8/PROJ-9: Accepts optional AppContext detected at hotkey press
+  const startRecording = useCallback(async (context?: AppContext) => {
     const now = Date.now()
 
     // Debounce for toggle mode
@@ -137,6 +158,9 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     setRecordingStartTime(now)
     setRecordingDuration(0)
     setError(null)
+    // PROJ-8/PROJ-9: Store context for later use in text processing
+    setCurrentContext(context || null)
+    currentContextRef.current = context || null
 
     // Sync state with backend (BUG-3 fix)
     if (isTauri) {
@@ -164,8 +188,8 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
           const streamError = await invoke<string | null>('check_audio_health')
           if (streamError) {
             // Device disconnected or stream error
-            toast.error('Mikrofon getrennt', {
-              description: 'Die Aufnahme wurde abgebrochen, da das Mikrofon getrennt wurde.',
+            showErrorByCode('ERR_MIC_DISCONNECTED', 'hotkey', {
+              details: 'Die Aufnahme wurde abgebrochen, da das Mikrofon getrennt wurde.',
             })
             cancelRecording('Mikrofon getrennt')
           }
@@ -181,20 +205,17 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
 
     // Set warning timeout (30 seconds before max)
     warningTimeoutRef.current = setTimeout(() => {
-      toast.warning('Noch 30 Sekunden', {
-        description: 'Maximale Aufnahmezeit wird bald erreicht',
-      })
+      showWarning('Noch 30 Sekunden', 'Maximale Aufnahmezeit wird bald erreicht')
     }, warningTimeMs)
 
     // Set max timeout (user-configured duration)
     maxTimeoutRef.current = setTimeout(() => {
-      toast.info('Maximale Aufnahmezeit erreicht', {
-        description: 'Aufnahme wird automatisch beendet',
-      })
+      showInfo('Maximale Aufnahmezeit erreicht', 'Aufnahme wird automatisch beendet')
       stopRecording()
     }, maxRecordingTimeMs)
 
-    events?.onRecordingStart?.()
+    // PROJ-8/PROJ-9: Pass context to callback
+    events?.onRecordingStart?.(context)
   }, [settings.mode, events, isTauri, maxDurationMinutes])
 
   // Stop recording handler
@@ -226,15 +247,15 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
         await invoke('set_recording_state', { recording: false })
         const result = await invoke<RecordingStopResult>('stop_audio_recording')
         console.log('Recording saved to:', result.file_path)
-        // Pass file_path to callback for PROJ-4 (Whisper transcription)
-        events?.onRecordingStop?.(result)
+        // PROJ-8/PROJ-9: Pass file_path and context to callback for context-aware processing
+        events?.onRecordingStop?.(result, currentContextRef.current || undefined)
       } catch (err) {
         console.error('Failed to stop recording:', err)
         setError('Aufnahme konnte nicht gespeichert werden')
       }
     } else {
       // Non-Tauri mode: pass dummy result
-      events?.onRecordingStop?.({ file_path: '', duration_ms: 0, privacy_mode: false })
+      events?.onRecordingStop?.({ file_path: '', duration_ms: 0, privacy_mode: false }, currentContextRef.current || undefined)
     }
 
     // After processing is done, reset to idle
@@ -298,9 +319,10 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
 
     const setupListeners = async () => {
       // Push-to-Talk: Start on press
-      const unlistenPressed = await listen('hotkey-pressed', () => {
+      // PROJ-8/PROJ-9: Event payload contains AppContext for context-aware processing
+      const unlistenPressed = await listen<AppContext | null>('hotkey-pressed', (event) => {
         if (recordingState === 'idle') {
-          startRecording()
+          startRecording(event.payload || undefined)
         }
       })
       unlisteners.push(unlistenPressed)
@@ -322,9 +344,10 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
       unlisteners.push(unlistenCancelled)
 
       // Toggle mode: Start recording
-      const unlistenStart = await listen('hotkey-start-recording', () => {
+      // PROJ-8/PROJ-9: Event payload contains AppContext for context-aware processing
+      const unlistenStart = await listen<AppContext | null>('hotkey-start-recording', (event) => {
         if (recordingState === 'idle') {
-          startRecording()
+          startRecording(event.payload || undefined)
         }
       })
       unlisteners.push(unlistenStart)
@@ -339,9 +362,7 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
 
       // EC-2.4: Hotkey pressed during processing
       const unlistenBusy = await listen('hotkey-busy', () => {
-        toast.info('Verarbeitung läuft...', {
-          description: 'Bitte warte bis die aktuelle Aufnahme verarbeitet wurde',
-        })
+        showInfo('Verarbeitung läuft...', 'Bitte warte bis die aktuelle Aufnahme verarbeitet wurde')
       })
       unlisteners.push(unlistenBusy)
 
@@ -434,5 +455,7 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     requestAccessibilityPermission,
     recordingStartTime,
     recordingDuration,
+    // PROJ-8/PROJ-9: Expose current context for context-aware processing
+    currentContext,
   }
 }

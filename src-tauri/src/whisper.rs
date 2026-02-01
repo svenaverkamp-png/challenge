@@ -67,8 +67,8 @@ impl WhisperModel {
     /// Note: These are placeholder hashes - real ones should be verified from Hugging Face
     pub fn expected_hash_prefix(&self) -> &'static str {
         match self {
-            WhisperModel::Tiny => "be7e29e", // Partial hash for ggml-tiny.bin
-            WhisperModel::Small => "9ecf779", // Partial hash for ggml-small.bin
+            WhisperModel::Tiny => "be7e29e",   // Partial hash for ggml-tiny.bin
+            WhisperModel::Small => "9ecf779",  // Partial hash for ggml-small.bin
             WhisperModel::Medium => "fd9727b", // Partial hash for ggml-medium.bin
         }
     }
@@ -294,32 +294,36 @@ impl WhisperManager {
 
     /// Get status for all models
     pub fn get_all_model_status(&self) -> Vec<ModelStatus> {
-        vec![WhisperModel::Tiny, WhisperModel::Small, WhisperModel::Medium]
-            .into_iter()
-            .map(|model| {
-                let downloaded = Self::is_model_downloaded(model);
-                let file_size = if downloaded {
-                    Self::get_model_file_size(model)
-                } else {
-                    None
-                };
-                let loaded = self.loaded_model == Some(model);
-                let downloading = self
-                    .download_progress
-                    .lock()
-                    .ok()
-                    .and_then(|p| p.as_ref().map(|dp| dp.model == model && !dp.complete))
-                    .unwrap_or(false);
+        vec![
+            WhisperModel::Tiny,
+            WhisperModel::Small,
+            WhisperModel::Medium,
+        ]
+        .into_iter()
+        .map(|model| {
+            let downloaded = Self::is_model_downloaded(model);
+            let file_size = if downloaded {
+                Self::get_model_file_size(model)
+            } else {
+                None
+            };
+            let loaded = self.loaded_model == Some(model);
+            let downloading = self
+                .download_progress
+                .lock()
+                .ok()
+                .and_then(|p| p.as_ref().map(|dp| dp.model == model && !dp.complete))
+                .unwrap_or(false);
 
-                ModelStatus {
-                    model,
-                    downloaded,
-                    file_size,
-                    loaded,
-                    downloading,
-                }
-            })
-            .collect()
+            ModelStatus {
+                model,
+                downloaded,
+                file_size,
+                loaded,
+                downloading,
+            }
+        })
+        .collect()
     }
 
     /// Update settings
@@ -354,8 +358,8 @@ impl WhisperManager {
 
         // Check disk space (need 2x model size for download + extraction)
         let required_space = model.expected_size() * 2;
-        let available_space = fs2::available_space(Self::get_models_dir())
-            .map_err(|e| WhisperError::IoError(e))?;
+        let available_space =
+            fs2::available_space(Self::get_models_dir()).map_err(|e| WhisperError::IoError(e))?;
 
         if available_space < required_space {
             return Err(WhisperError::InsufficientSpace);
@@ -385,9 +389,7 @@ impl WhisperManager {
             .await
             .map_err(|e| WhisperError::DownloadError(e.to_string()))?;
 
-        let total_size = response
-            .content_length()
-            .unwrap_or(model.expected_size());
+        let total_size = response.content_length().unwrap_or(model.expected_size());
 
         // Update total size in progress
         {
@@ -513,11 +515,8 @@ impl WhisperManager {
         let params = WhisperContextParameters::default();
 
         // Load the model
-        let ctx = WhisperContext::new_with_params(
-            model_path.to_str().unwrap(),
-            params,
-        )
-        .map_err(|e| WhisperError::ModelLoadError(format!("{:?}", e)))?;
+        let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap(), params)
+            .map_err(|e| WhisperError::ModelLoadError(format!("{:?}", e)))?;
 
         self.context = Some(ctx);
         self.loaded_model = Some(model);
@@ -583,7 +582,9 @@ impl WhisperManager {
         };
 
         if samples.is_empty() {
-            return Err(WhisperError::InvalidAudioFile("Empty audio file".to_string()));
+            return Err(WhisperError::InvalidAudioFile(
+                "Empty audio file".to_string(),
+            ));
         }
 
         log::info!("Transcribing {} samples", samples.len());
@@ -615,7 +616,8 @@ impl WhisperManager {
             .map_err(|e| WhisperError::TranscriptionError(format!("{:?}", e)))?;
 
         // Extract results
-        let num_segments = state.full_n_segments()
+        let num_segments = state
+            .full_n_segments()
             .map_err(|e| WhisperError::TranscriptionError(format!("{:?}", e)))?;
 
         let mut full_text = String::new();

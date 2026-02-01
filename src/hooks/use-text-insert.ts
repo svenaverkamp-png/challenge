@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { toast } from 'sonner'
 import { useTauri } from './use-tauri'
+import { showErrorByCode, showInfo, showSuccess } from '@/lib/app-error'
 
 /** Text insert method */
 export type InsertMethod = 'Auto' | 'Clipboard' | 'Keyboard'
@@ -118,9 +118,7 @@ export function useTextInsert(): UseTextInsertReturn {
         (event) => {
           setIsInserting(false)
           setLastResult(event.payload)
-          toast.info('Text in Zwischenablage kopiert', {
-            description: 'Direkte Eingabe nicht moeglich. Nutze Cmd+V zum Einfuegen.',
-          })
+          showInfo('Text in Zwischenablage kopiert', 'Direkte Eingabe nicht moeglich. Nutze Cmd+V zum Einfuegen.')
         }
       )
       unlisteners.push(unlistenClipboardFallback)
@@ -130,9 +128,7 @@ export function useTextInsert(): UseTextInsertReturn {
         'text-insert-clipboard-only',
         () => {
           setIsInserting(false)
-          toast.success('Text in Zwischenablage kopiert', {
-            description: 'Nutze Cmd+V zum Einfuegen.',
-          })
+          showSuccess('Text in Zwischenablage kopiert', 'Nutze Cmd+V zum Einfuegen.')
         }
       )
       unlisteners.push(unlistenClipboardOnly)
@@ -143,8 +139,8 @@ export function useTextInsert(): UseTextInsertReturn {
         (event) => {
           setIsInserting(false)
           setLastResult(event.payload)
-          toast.error('Text konnte nicht eingefuegt werden', {
-            description: event.payload.error || 'Unbekannter Fehler',
+          showErrorByCode('ERR_INSERT_FAILED', 'text-insert', {
+            details: event.payload.error || 'Unbekannter Fehler',
           })
         }
       )
@@ -171,7 +167,7 @@ export function useTextInsert(): UseTextInsertReturn {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Einstellungen konnten nicht gespeichert werden'
-        toast.error('Fehler', { description: message })
+        showErrorByCode('ERR_UNKNOWN', 'text-insert', { details: message })
         throw err
       }
     },
@@ -185,9 +181,7 @@ export function useTextInsert(): UseTextInsertReturn {
         // Web fallback: use browser clipboard API
         try {
           await navigator.clipboard.writeText(text)
-          toast.success('Text in Zwischenablage kopiert', {
-            description: 'Nutze Cmd/Ctrl+V zum Einfuegen.',
-          })
+          showSuccess('Text in Zwischenablage kopiert', 'Nutze Cmd/Ctrl+V zum Einfuegen.')
           return {
             success: true,
             method_used: 'browser_clipboard',
@@ -216,7 +210,7 @@ export function useTextInsert(): UseTextInsertReturn {
       } catch (err) {
         setIsInserting(false)
         const message = err instanceof Error ? err.message : 'Text konnte nicht eingefuegt werden'
-        toast.error('Fehler beim Einfuegen', { description: message })
+        showErrorByCode('ERR_INSERT_FAILED', 'text-insert', { details: message })
         return null
       }
     },

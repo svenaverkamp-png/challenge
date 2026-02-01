@@ -213,7 +213,10 @@ impl AudioRecorder {
                     );
                     return Err(AudioError::InsufficientSpace);
                 }
-                log::debug!("Disk space check passed: {} MB available", space / (1024 * 1024));
+                log::debug!(
+                    "Disk space check passed: {} MB available",
+                    space / (1024 * 1024)
+                );
                 Ok(())
             }
             Err(e) => {
@@ -249,7 +252,11 @@ impl AudioRecorder {
 
     /// Check if the stream had an error (device disconnected, etc.)
     pub fn has_stream_error(&self) -> bool {
-        self.stream_error.lock().ok().map(|e| e.is_some()).unwrap_or(false)
+        self.stream_error
+            .lock()
+            .ok()
+            .map(|e| e.is_some())
+            .unwrap_or(false)
     }
 
     /// Start recording
@@ -369,11 +376,9 @@ impl AudioRecorder {
 
                     for frame in data.chunks(channels) {
                         // Average all channels to mono
-                        let mono_sample: f32 = frame
-                            .iter()
-                            .map(|s| f32::from_sample(*s))
-                            .sum::<f32>()
-                            / channels as f32;
+                        let mono_sample: f32 =
+                            frame.iter().map(|s| f32::from_sample(*s)).sum::<f32>()
+                                / channels as f32;
 
                         samples_lock.push(mono_sample);
                         sum_squared += mono_sample * mono_sample;
@@ -526,8 +531,8 @@ impl AudioRecorder {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let file = fs::File::create(&file_path)
-            .map_err(|e| AudioError::WavWriteError(e.to_string()))?;
+        let file =
+            fs::File::create(&file_path).map_err(|e| AudioError::WavWriteError(e.to_string()))?;
         let writer = BufWriter::new(file);
         let mut wav_writer =
             WavWriter::new(writer, spec).map_err(|e| AudioError::WavWriteError(e.to_string()))?;
@@ -556,10 +561,12 @@ impl AudioRecorder {
         let path = PathBuf::from(file_path);
 
         // Canonicalize paths to resolve any "../" or symlinks
-        let canonical_path = path.canonicalize()
+        let canonical_path = path
+            .canonicalize()
             .map_err(|e| AudioError::WavWriteError(format!("Invalid path: {}", e)))?;
-        let canonical_recordings_dir = recordings_dir.canonicalize()
-            .map_err(|e| AudioError::WavWriteError(format!("Failed to get recordings dir: {}", e)))?;
+        let canonical_recordings_dir = recordings_dir.canonicalize().map_err(|e| {
+            AudioError::WavWriteError(format!("Failed to get recordings dir: {}", e))
+        })?;
 
         // SECURITY: Validate that the file is within the recordings directory
         if !canonical_path.starts_with(&canonical_recordings_dir) {
@@ -568,7 +575,7 @@ impl AudioRecorder {
                 file_path
             );
             return Err(AudioError::WavWriteError(
-                "Security error: Cannot delete files outside recordings directory".to_string()
+                "Security error: Cannot delete files outside recordings directory".to_string(),
             ));
         }
 

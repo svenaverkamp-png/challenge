@@ -19,12 +19,16 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      position="top-right"
+      visibleToasts={3}
+      gap={8}
+      closeButton={true}
       icons={{
-        success: <CircleCheck className="h-4 w-4" />,
-        info: <Info className="h-4 w-4" />,
-        warning: <TriangleAlert className="h-4 w-4" />,
-        error: <OctagonX className="h-4 w-4" />,
-        loading: <LoaderCircle className="h-4 w-4 animate-spin" />,
+        success: <CircleCheck className="h-4 w-4 text-green-500" />,
+        info: <Info className="h-4 w-4 text-blue-500" />,
+        warning: <TriangleAlert className="h-4 w-4 text-yellow-500" />,
+        error: <OctagonX className="h-4 w-4 text-red-500" />,
+        loading: <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" />,
       }}
       toastOptions={{
         classNames: {
@@ -32,9 +36,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
             "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
           description: "group-[.toast]:text-muted-foreground",
           actionButton:
-            "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
+            "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:text-xs group-[.toast]:px-2 group-[.toast]:py-1",
           cancelButton:
-            "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+            "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground group-[.toast]:text-xs group-[.toast]:px-2 group-[.toast]:py-1",
+          closeButton:
+            "group-[.toast]:bg-background group-[.toast]:border-border",
         },
       }}
       {...props}

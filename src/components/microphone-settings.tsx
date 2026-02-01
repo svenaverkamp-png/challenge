@@ -13,8 +13,8 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTauri } from '@/hooks/use-tauri'
 import { Mic, MicOff, Volume2, Shield, Clock, AlertCircle, RefreshCw, AlertTriangle } from 'lucide-react'
-import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { showWarning, showSuccess } from '@/lib/app-error'
 
 /** Audio device info from backend */
 interface AudioDevice {
@@ -91,10 +91,7 @@ export function MicrophoneSettings() {
           const selectedExists = currentDevices.some(d => d.id === settings.device_id)
           if (!selectedExists && !deviceDisconnected) {
             setDeviceDisconnected(true)
-            toast.warning('Mikrofon getrennt', {
-              description: 'Das ausgewaehlte Mikrofon wurde getrennt. Wechsle zu Standard-Mikrofon.',
-              duration: 5000,
-            })
+            showWarning('Mikrofon getrennt', 'Das ausgewaehlte Mikrofon wurde getrennt. Wechsle zu Standard-Mikrofon.')
             // Auto-fallback to default
             await updateSettings({ device_id: null })
             setDevices(currentDevices)
@@ -106,9 +103,7 @@ export function MicrophoneSettings() {
           setDevices(currentDevices)
           if (deviceDisconnected && currentDevices.length > devices.length) {
             setDeviceDisconnected(false)
-            toast.success('Mikrofon verbunden', {
-              description: 'Ein neues Mikrofon wurde erkannt.',
-            })
+            showSuccess('Mikrofon verbunden', 'Ein neues Mikrofon wurde erkannt.')
           }
         }
       } catch {

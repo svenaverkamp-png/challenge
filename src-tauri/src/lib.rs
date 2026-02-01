@@ -1952,10 +1952,11 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         // Register managed state for app status tracking and crash detection
         .manage(initial_state)
         .setup(|app| {
-            // Setup logging (always enabled for crash tracking)
+            // Setup logging with rotation (PROJ-12: Max 5 files à 10MB)
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(if cfg!(debug_assertions) {
@@ -1963,6 +1964,8 @@ pub fn run() {
                     } else {
                         log::LevelFilter::Info
                     })
+                    .max_file_size(10 * 1024 * 1024) // 10 MB per file
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
                     .build(),
             )?;
 

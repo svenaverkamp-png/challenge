@@ -266,7 +266,10 @@ fn insert_via_clipboard(text: &str, settings: &TextInsertSettings) -> TextInsert
             in_clipboard: !settings.clipboard_restore,
         },
         Err(e) => {
-            log::warn!("Paste simulation failed: {}. Text is still in clipboard.", e);
+            log::warn!(
+                "Paste simulation failed: {}. Text is still in clipboard.",
+                e
+            );
             TextInsertResult {
                 success: false,
                 method_used: "clipboard_fallback".to_string(),
@@ -420,10 +423,7 @@ mod tests {
         assert_eq!(sanitize_for_terminal_safety("Hello World"), "Hello World");
 
         // Newlines replaced with spaces
-        assert_eq!(
-            sanitize_for_terminal_safety("Hello\nWorld"),
-            "Hello World"
-        );
+        assert_eq!(sanitize_for_terminal_safety("Hello\nWorld"), "Hello World");
 
         // Carriage returns also replaced
         assert_eq!(
@@ -438,10 +438,7 @@ mod tests {
         );
 
         // SECURITY: Dangerous command is neutralized
-        assert_eq!(
-            sanitize_for_terminal_safety("rm -rf /\n"),
-            "rm -rf /"
-        );
+        assert_eq!(sanitize_for_terminal_safety("rm -rf /\n"), "rm -rf /");
 
         // Multi-line text becomes single line
         assert_eq!(

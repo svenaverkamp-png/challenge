@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { toast } from 'sonner'
 import { useTauri } from './use-tauri'
+import { showErrorByCode } from '@/lib/app-error'
 
 /** Audio device info from backend */
 export interface AudioDevice {
@@ -117,15 +117,15 @@ export function useAudioRecording(): UseAudioRecordingReturn {
       const unlistenError = await listen<string>('audio-error', (event) => {
         setError(event.payload)
         setIsRecording(false)
-        toast.error('Audio-Fehler', { description: event.payload })
+        showErrorByCode('ERR_AUDIO', 'audio-recording', { details: event.payload })
       })
       unlisteners.push(unlistenError)
 
       // No device found
       const unlistenNoDevice = await listen<string>('audio-error-no-device', (event) => {
         setError(event.payload)
-        toast.error('Kein Mikrofon gefunden', {
-          description: 'Bitte Mikrofon anschließen und erneut versuchen.',
+        showErrorByCode('ERR_MIC_NOT_FOUND', 'audio-recording', {
+          details: 'Bitte Mikrofon anschliessen und erneut versuchen.',
         })
       })
       unlisteners.push(unlistenNoDevice)
@@ -133,8 +133,8 @@ export function useAudioRecording(): UseAudioRecordingReturn {
       // Permission denied
       const unlistenPermission = await listen<string>('audio-error-permission', (event) => {
         setError(event.payload)
-        toast.error('Mikrofon-Zugriff verweigert', {
-          description: 'Bitte Mikrofon-Berechtigung in den Systemeinstellungen erteilen.',
+        showErrorByCode('ERR_MIC_PERMISSION', 'audio-recording', {
+          details: 'Bitte Mikrofon-Berechtigung in den Systemeinstellungen erteilen.',
         })
       })
       unlisteners.push(unlistenPermission)
@@ -142,8 +142,8 @@ export function useAudioRecording(): UseAudioRecordingReturn {
       // Device busy
       const unlistenBusy = await listen<string>('audio-error-busy', (event) => {
         setError(event.payload)
-        toast.error('Mikrofon belegt', {
-          description: 'Das Mikrofon wird von einer anderen App verwendet.',
+        showErrorByCode('ERR_MIC_BUSY', 'audio-recording', {
+          details: 'Das Mikrofon wird von einer anderen App verwendet.',
         })
       })
       unlisteners.push(unlistenBusy)

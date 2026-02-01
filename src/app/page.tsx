@@ -3,7 +3,6 @@
 import { useCallback, useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { SettingsPanel } from '@/components/settings-panel'
 import { StatusIndicator } from '@/components/status-indicator'
 import { RecordingIndicator } from '@/components/recording-indicator'
 import { AccessibilityPermissionDialog } from '@/components/accessibility-permission-dialog'
@@ -17,8 +16,9 @@ import { useOllama } from '@/hooks/use-ollama'
 import { useTauri } from '@/hooks/use-tauri'
 import { useOverlayWindow } from '@/hooks/use-overlay-window'
 import { invoke } from '@tauri-apps/api/core'
-import { toast } from 'sonner'
-import { Mic, X, Copy, Check, Brain } from 'lucide-react'
+import { Mic, X, Copy, Check, Brain, Settings } from 'lucide-react'
+import { showSuccess, showWarning, showInfo, showErrorByCode } from '@/lib/app-error'
+import Link from 'next/link'
 
 export default function Home() {
   const { status, errorMessage, setStatus } = useAppStatus()
@@ -85,9 +85,7 @@ export default function Home() {
     const currentModelStatus = modelStatus.find(s => s.model === whisperSettings.model)
 
     if (!currentModelStatus?.downloaded) {
-      toast.warning('Kein Whisper-Modell', {
-        description: 'Bitte laden Sie ein Modell in den Einstellungen herunter.',
-      })
+      showWarning('Kein Whisper-Modell', 'Bitte laden Sie ein Modell in den Einstellungen herunter.')
       setStatus('idle')
       notifyError('Kein Whisper-Modell')
       return
@@ -127,9 +125,7 @@ export default function Home() {
               } else if (improveResult?.error) {
                 // Ollama failed - use original text, show warning
                 console.warn('Ollama auto-edit failed:', improveResult.error)
-                toast.warning('AI-Bearbeitung fehlgeschlagen', {
-                  description: 'Rohtext wird verwendet.',
-                })
+                showWarning('AI-Bearbeitung fehlgeschlagen', 'Rohtext wird verwendet.')
               }
             } catch (ollamaErr) {
               console.warn('Ollama error:', ollamaErr)
@@ -143,36 +139,28 @@ export default function Home() {
           if (textInsertSettings.enabled) {
             const insertResult = await insertText(finalText)
             if (insertResult?.success) {
-              toast.success('Text eingefuegt', {
-                description: `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`,
-              })
+              showSuccess('Text eingefuegt', `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`)
             } else if (insertResult?.in_clipboard) {
               // Fallback to clipboard - toast already shown by hook
             } else {
               // Show transcription success even if insert failed
-              toast.success('Transkription fertig', {
-                description: `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`,
-              })
+              showSuccess('Transkription fertig', `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`)
             }
           } else {
             // Text insert disabled - just show transcription success
-            toast.success('Transkription fertig', {
-              description: `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`,
-            })
+            showSuccess('Transkription fertig', `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`)
           }
 
           // PROJ-5: Notify overlay that transcription is done
           notifyDone()
         } else {
-          toast.info('Keine Sprache erkannt', {
-            description: 'Bitte versuche es erneut.',
-          })
+          showInfo('Keine Sprache erkannt', 'Bitte versuche es erneut.')
           // PROJ-5: Still mark as done (no error)
           notifyDone()
         }
       } catch (err) {
         console.error('Transcription failed:', err)
-        toast.error('Transkription fehlgeschlagen')
+        showErrorByCode('ERR_TRANSCRIPTION_FAILED', 'page')
         // PROJ-5: Notify overlay of error
         notifyError('Transkription fehlgeschlagen')
       }
@@ -206,11 +194,11 @@ export default function Home() {
     try {
       await navigator.clipboard.writeText(transcriptionText)
       setCopied(true)
-      toast.success('In Zwischenablage kopiert')
+      showSuccess('In Zwischenablage kopiert')
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
-      toast.error('Kopieren fehlgeschlagen')
+      showErrorByCode('ERR_CLIPBOARD', 'page')
     }
   }, [transcriptionText])
 
@@ -261,6 +249,16 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-3">
             <StatusIndicator status={status} errorMessage={errorMessage} />
+            <Button
+              variant="ghost"
+              size="icon"
+              asChild
+              className="opacity-60 hover:opacity-100"
+            >
+              <Link href="/settings" aria-label="Einstellungen">
+                <Settings className="h-4 w-4" />
+              </Link>
+            </Button>
             {isTauri && (
               <Button
                 variant="ghost"
@@ -417,9 +415,6 @@ export default function Home() {
             </CardContent>
           </Card>
         )}
-
-        {/* Settings */}
-        <SettingsPanel />
 
         {/* Footer */}
         <footer className="text-center">
