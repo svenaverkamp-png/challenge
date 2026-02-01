@@ -12,6 +12,7 @@ import { MicrophoneSettings } from '@/components/microphone-settings'
 import { WhisperSettings } from '@/components/whisper-settings'
 import { TextInsertSettings } from '@/components/text-insert-settings'
 import { OllamaSettings } from '@/components/ollama-settings'
+import { ContextSettings } from '@/components/context-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -34,6 +35,9 @@ export function SettingsPanel() {
 
       {/* AI Auto-Edit Settings (PROJ-7) */}
       <OllamaSettings />
+
+      {/* Context Awareness Settings (PROJ-8) */}
+      <ContextSettings />
 
       {/* General Settings */}
       <Card>

@@ -14,11 +14,13 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod audio;
+mod context;
 mod ollama;
 mod text_insert;
 mod whisper;
 
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
+use context::{AppCategory, AppContext, AppMapping, ContextConfig, ContextManager};
 use ollama::{AutoEditResult, OllamaManager, OllamaSettings, OllamaStatus};
 use text_insert::{InsertMethod, TextInsertResult, TextInsertSettings};
 use whisper::{
@@ -61,7 +63,7 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Managed state for current app status, crash detection, hotkey, audio, whisper, ollama, and text insert
+/// Managed state for current app status, crash detection, hotkey, audio, whisper, ollama, text insert, and context
 pub struct AppState {
     current_status: Mutex<AppStatus>,
     had_previous_crash: Mutex<bool>,
@@ -79,6 +81,8 @@ pub struct AppState {
     // Ollama state (PROJ-7)
     ollama_manager: Mutex<OllamaManager>,
     ollama_settings: Mutex<OllamaSettings>,
+    // Context awareness state (PROJ-8)
+    context_manager: Mutex<ContextManager>,
 }
 
 impl Default for AppState {
@@ -97,6 +101,7 @@ impl Default for AppState {
             text_insert_settings: Mutex::new(TextInsertSettings::default()),
             ollama_manager: Mutex::new(OllamaManager::new()),
             ollama_settings: Mutex::new(OllamaSettings::default()),
+            context_manager: Mutex::new(ContextManager::new()),
         }
     }
 }
@@ -225,9 +230,9 @@ fn setup_panic_handler() {
         };
 
         // Get location
-        let location = panic_info.location().map(|loc| {
-            format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
-        });
+        let location = panic_info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()));
 
         let crash_info = CrashInfo {
             timestamp,
@@ -366,10 +371,10 @@ async fn check_shortcut_available<R: Runtime>(
     app: tauri::AppHandle<R>,
     shortcut: String,
 ) -> Result<bool, String> {
-    let sc: Shortcut = shortcut.parse().map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
-    let is_registered = app
-        .global_shortcut()
-        .is_registered(sc);
+    let sc: Shortcut = shortcut
+        .parse()
+        .map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
+    let is_registered = app.global_shortcut().is_registered(sc);
     Ok(!is_registered)
 }
 
@@ -433,7 +438,10 @@ async fn get_audio_settings(state: State<'_, AppState>) -> Result<AudioSettings,
 
 /// Update audio settings
 #[tauri::command]
-async fn set_audio_settings(state: State<'_, AppState>, settings: AudioSettings) -> Result<(), String> {
+async fn set_audio_settings(
+    state: State<'_, AppState>,
+    settings: AudioSettings,
+) -> Result<(), String> {
     // Save to state
     {
         let mut current = state.audio_settings.lock().map_err(|e| e.to_string())?;
@@ -777,9 +785,11 @@ async fn transcribe_audio<R: Runtime>(
     let path = PathBuf::from(&wav_path);
 
     // Canonicalize paths to resolve any "../" or symlinks
-    let canonical_path = path.canonicalize()
+    let canonical_path = path
+        .canonicalize()
         .map_err(|e| format!("Invalid file path: {}", e))?;
-    let canonical_recordings_dir = recordings_dir.canonicalize()
+    let canonical_recordings_dir = recordings_dir
+        .canonicalize()
         .map_err(|e| format!("Failed to get recordings directory: {}", e))?;
 
     // Validate path is within recordings directory
@@ -819,8 +829,13 @@ async fn transcribe_audio<R: Runtime>(
 
 /// Get current text insert settings
 #[tauri::command]
-async fn get_text_insert_settings(state: State<'_, AppState>) -> Result<TextInsertSettings, String> {
-    let settings = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+async fn get_text_insert_settings(
+    state: State<'_, AppState>,
+) -> Result<TextInsertSettings, String> {
+    let settings = state
+        .text_insert_settings
+        .lock()
+        .map_err(|e| e.to_string())?;
     Ok(settings.clone())
 }
 
@@ -832,7 +847,10 @@ async fn set_text_insert_settings(
 ) -> Result<(), String> {
     // Save to state
     {
-        let mut current = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+        let mut current = state
+            .text_insert_settings
+            .lock()
+            .map_err(|e| e.to_string())?;
         *current = settings.clone();
     }
 
@@ -852,7 +870,10 @@ async fn insert_text<R: Runtime>(
     text: String,
 ) -> Result<TextInsertResult, String> {
     let settings = {
-        let s = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+        let s = state
+            .text_insert_settings
+            .lock()
+            .map_err(|e| e.to_string())?;
         s.clone()
     };
 
@@ -1042,9 +1063,108 @@ async fn pull_ollama_model<R: Runtime>(
     }
 }
 
+// ============================================================================
+// Context Awareness Commands (PROJ-8)
+// ============================================================================
+
+/// Detect the current application context
+/// This is called when the user presses the hotkey to capture which app they're in
+#[tauri::command]
+async fn detect_context(state: State<'_, AppState>) -> Result<AppContext, String> {
+    let manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    manager.detect_context()
+}
+
+/// Get the current context configuration
+#[tauri::command]
+async fn get_context_config(state: State<'_, AppState>) -> Result<ContextConfig, String> {
+    let manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+    Ok(manager.get_config().clone())
+}
+
+/// Update context configuration (user mappings)
+#[tauri::command]
+async fn set_context_config(
+    state: State<'_, AppState>,
+    config: ContextConfig,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+        manager.update_config(config.clone());
+    }
+
+    // Persist to config file
+    context::save_config(&config)?;
+
+    log::info!(
+        "Context config updated with {} user mappings",
+        config.user_mappings.len()
+    );
+    Ok(())
+}
+
+/// Add or update a user app mapping
+#[tauri::command]
+async fn set_app_mapping(
+    state: State<'_, AppState>,
+    identifier: String,
+    name: String,
+    category: AppCategory,
+) -> Result<(), String> {
+    let config = {
+        let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+        manager.set_user_mapping(
+            identifier,
+            AppMapping {
+                name,
+                category,
+                is_builtin: false,
+            },
+        );
+        manager.get_config().clone()
+    };
+
+    // Persist changes
+    context::save_config(&config)?;
+
+    log::info!("App mapping updated");
+    Ok(())
+}
+
+/// Remove a user app mapping
+#[tauri::command]
+async fn remove_app_mapping(state: State<'_, AppState>, identifier: String) -> Result<(), String> {
+    let config = {
+        let mut manager = state.context_manager.lock().map_err(|e| e.to_string())?;
+        manager.remove_user_mapping(&identifier);
+        manager.get_config().clone()
+    };
+
+    // Persist changes
+    context::save_config(&config)?;
+
+    log::info!("App mapping removed: {}", identifier);
+    Ok(())
+}
+
+/// Get all available app categories
+#[tauri::command]
+async fn get_app_categories() -> Result<Vec<(String, String)>, String> {
+    Ok(ContextManager::get_categories()
+        .into_iter()
+        .map(|(cat, name)| (format!("{:?}", cat).to_lowercase(), name.to_string()))
+        .collect())
+}
+
 /// Register a global hotkey
-fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &str) -> Result<(), String> {
-    let shortcut: Shortcut = shortcut_str.parse().map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
+fn register_global_hotkey<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    shortcut_str: &str,
+) -> Result<(), String> {
+    let shortcut: Shortcut = shortcut_str
+        .parse()
+        .map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
 
     let app_handle = app.clone();
     app.global_shortcut()
@@ -1080,14 +1200,52 @@ fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &
                         return;
                     }
 
+                    // PROJ-8: Detect context when hotkey is pressed
+                    let context = {
+                        if let Ok(manager) = state.context_manager.lock() {
+                            match manager.detect_context() {
+                                Ok(ctx) => {
+                                    log::debug!(
+                                        "Context detected: {:?} ({:?})",
+                                        ctx.app_name,
+                                        ctx.category
+                                    );
+                                    Some(ctx)
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to detect context: {}", e);
+                                    // Emit warning for accessibility permission
+                                    if e.contains("Accessibility permission") {
+                                        let _ = _app.emit("context-permission-required", e.clone());
+                                    }
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    };
+
+                    // Emit context-detected event if we have context
+                    if let Some(ref ctx) = context {
+                        let _ = _app.emit("context-detected", ctx);
+
+                        // PROJ-8 BUG-1 fix: Emit event for unknown apps
+                        if ctx.category == context::AppCategory::Other
+                            && ctx.app_name != "Desktop"
+                        {
+                            let _ = _app.emit("context-unknown-app", &ctx.app_name);
+                        }
+                    }
+
                     match mode {
                         HotkeyMode::PushToTalk => {
                             // Record press time for minimum hold duration check
                             if let Ok(mut press_time) = state.hotkey_press_time.lock() {
                                 *press_time = Some(std::time::Instant::now());
                             }
-                            // Emit press event to frontend
-                            let _ = _app.emit("hotkey-pressed", ());
+                            // Emit press event to frontend (with context)
+                            let _ = _app.emit("hotkey-pressed", context);
                         }
                         HotkeyMode::Toggle => {
                             // Toggle recording state
@@ -1101,7 +1259,8 @@ fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &
                             };
 
                             if should_start {
-                                let _ = _app.emit("hotkey-start-recording", ());
+                                // Include context when starting recording
+                                let _ = _app.emit("hotkey-start-recording", context);
                             } else {
                                 let _ = _app.emit("hotkey-stop-recording", ());
                             }
@@ -1130,7 +1289,8 @@ fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &
                             let _ = _app.emit("hotkey-released", ());
                         } else {
                             // Too short, cancel
-                            let _ = _app.emit("hotkey-cancelled", "Taste zu kurz gedrückt (min. 300ms)");
+                            let _ = _app
+                                .emit("hotkey-cancelled", "Taste zu kurz gedrückt (min. 300ms)");
                         }
 
                         // Clear press time
@@ -1155,7 +1315,8 @@ fn register_global_hotkey<R: Runtime>(app: &tauri::AppHandle<R>, shortcut_str: &
 fn create_tray_menu<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
     let status_item = MenuItem::with_id(app, "status", "Status: Bereit", false, None::<&str>)?;
     let separator = MenuItem::with_id(app, "sep", "─────────────", false, None::<&str>)?;
-    let settings_item = MenuItem::with_id(app, "settings", "Einstellungen öffnen", true, None::<&str>)?;
+    let settings_item =
+        MenuItem::with_id(app, "settings", "Einstellungen öffnen", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "App beenden", true, None::<&str>)?;
 
     Menu::with_items(app, &[&status_item, &separator, &settings_item, &quit_item])
@@ -1358,7 +1519,11 @@ pub fn run() {
     let mut ollama_manager = OllamaManager::new();
     ollama_manager.update_settings(ollama_settings.clone());
 
-    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, and text insert
+    // Load context config (PROJ-8)
+    let context_config = context::load_config();
+    let context_manager = ContextManager::with_config(context_config);
+
+    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, and context
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -1373,6 +1538,7 @@ pub fn run() {
         text_insert_settings: Mutex::new(text_insert_settings),
         ollama_manager: Mutex::new(ollama_manager),
         ollama_settings: Mutex::new(ollama_settings),
+        context_manager: Mutex::new(context_manager),
     };
 
     if had_crash {
@@ -1381,9 +1547,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(
-            tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])),
-        )
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // When second instance is launched, show the main window
             if let Some(window) = app.get_webview_window("main") {
@@ -1473,7 +1640,14 @@ pub fn run() {
             set_ollama_settings,
             check_ollama_status,
             improve_text,
-            pull_ollama_model
+            pull_ollama_model,
+            // Context awareness commands (PROJ-8)
+            detect_context,
+            get_context_config,
+            set_context_config,
+            set_app_mapping,
+            remove_app_mapping,
+            get_app_categories
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
