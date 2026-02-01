@@ -1,13 +1,16 @@
 {
-  "name": "ai-coding-starter-kit",
+  "name": "evervoice",
   "version": "1.0.0",
-  "description": "AI Coding Starter Kit with AI Agent Team System for Claude Code",
+  "description": "EverVoice - Local Voice-to-Text Desktop App",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -32,6 +35,10 @@
     "@radix-ui/react-toast": "^1.2.15",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/supabase-js": "^2.39.3",
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/cli": "^2.9.6",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-shell": "^2.3.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.0",
     "cmdk": "^1.1.1",
