@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Microphone access for audio recording (PROJ-3) -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>EverVoice benötigt Mikrofon-Zugriff für die Sprachaufnahme und Transkription.</string>
+
+    <!-- Accessibility for global hotkeys (PROJ-2) -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>EverVoice benötigt Zugriff für globale Tastenkombinationen.</string>
+</dict>
+</plist>

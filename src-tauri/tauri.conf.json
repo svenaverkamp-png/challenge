@@ -20,6 +20,23 @@
         "fullscreen": false,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "overlay",
+        "title": "Recording",
+        "url": "/overlay",
+        "width": 220,
+        "height": 90,
+        "resizable": false,
+        "fullscreen": false,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "x": 100,
+        "y": 50
       }
     ],
     "trayIcon": {
@@ -45,10 +62,7 @@
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": "entitlements.plist",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "EverVoice benötigt Mikrofon-Zugriff für die Sprachaufnahme und Transkription.",
-        "NSAppleEventsUsageDescription": "EverVoice benötigt Zugriff für globale Tastenkombinationen."
-      }
+      "infoPlist": "Info.plist"
     }
   },
   "plugins": {

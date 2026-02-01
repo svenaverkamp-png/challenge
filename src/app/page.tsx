@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { SettingsPanel } from '@/components/settings-panel'
@@ -10,8 +10,10 @@ import { AccessibilityPermissionDialog } from '@/components/accessibility-permis
 import { MicrophonePermissionDialog } from '@/components/microphone-permission-dialog'
 import { useAppStatus } from '@/hooks/use-app-status'
 import { useHotkey, RecordingStopResult } from '@/hooks/use-hotkey'
+import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useWhisper } from '@/hooks/use-whisper'
 import { useTauri } from '@/hooks/use-tauri'
+import { useOverlayWindow } from '@/hooks/use-overlay-window'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 import { Mic, X, Copy, Check, Brain } from 'lucide-react'
@@ -19,6 +21,23 @@ import { Mic, X, Copy, Check, Brain } from 'lucide-react'
 export default function Home() {
   const { status, errorMessage, setStatus } = useAppStatus()
   const { isTauri } = useTauri()
+
+  // Audio recording for audio level (PROJ-3)
+  const { audioLevel } = useAudioRecording()
+
+  // Overlay window management (PROJ-5)
+  const {
+    notifyRecordingStarted,
+    notifyRecordingStopped,
+    notifyAudioLevel,
+    notifyTranscribing,
+    notifyDone,
+    notifyError,
+    notifyCancelled,
+  } = useOverlayWindow()
+
+  // Track previous audio level for throttled updates
+  const lastAudioLevelRef = useRef(0)
 
   // Whisper integration (PROJ-4)
   const {
@@ -37,10 +56,14 @@ export default function Home() {
   const handleRecordingStart = useCallback(() => {
     setStatus('recording')
     setTranscriptionText(null) // Clear previous transcription
-  }, [setStatus])
+    // PROJ-5: Notify overlay
+    notifyRecordingStarted()
+  }, [setStatus, notifyRecordingStarted])
 
   const handleRecordingStop = useCallback(async (result: RecordingStopResult) => {
     setStatus('processing')
+    // PROJ-5: Notify overlay
+    notifyRecordingStopped()
 
     // Check if Whisper model is downloaded
     const currentModelStatus = modelStatus.find(s => s.model === whisperSettings.model)
@@ -50,36 +73,59 @@ export default function Home() {
         description: 'Bitte laden Sie ein Modell in den Einstellungen herunter.',
       })
       setStatus('idle')
+      notifyError('Kein Whisper-Modell')
       return
     }
 
     // Start transcription (PROJ-4)
     if (result.file_path && isTauri) {
       try {
+        // PROJ-5: Notify overlay that transcription is starting
+        notifyTranscribing()
+
         const transcriptionResult = await transcribe(result.file_path)
         if (transcriptionResult?.text) {
           setTranscriptionText(transcriptionResult.text)
           toast.success('Transkription fertig', {
             description: `${transcriptionResult.text.length} Zeichen in ${(transcriptionResult.processing_time_ms / 1000).toFixed(1)}s`,
           })
+          // PROJ-5: Notify overlay that transcription is done
+          notifyDone()
         } else {
           toast.info('Keine Sprache erkannt', {
             description: 'Bitte versuche es erneut.',
           })
+          // PROJ-5: Still mark as done (no error)
+          notifyDone()
         }
       } catch (err) {
         console.error('Transcription failed:', err)
         toast.error('Transkription fehlgeschlagen')
+        // PROJ-5: Notify overlay of error
+        notifyError('Transkription fehlgeschlagen')
       }
+    } else {
+      // No file path - still notify done
+      notifyDone()
     }
 
     setStatus('idle')
-  }, [setStatus, transcribe, modelStatus, whisperSettings.model, isTauri])
+  }, [setStatus, transcribe, modelStatus, whisperSettings.model, isTauri, notifyRecordingStopped, notifyTranscribing, notifyDone, notifyError])
 
   const handleRecordingCancel = useCallback((reason: string) => {
     setStatus('idle')
     console.log('Recording cancelled:', reason)
-  }, [setStatus])
+    // PROJ-5: Notify overlay
+    notifyCancelled()
+  }, [setStatus, notifyCancelled])
+
+  // PROJ-5: Send audio level updates to overlay during recording
+  useEffect(() => {
+    if (status === 'recording' && Math.abs(audioLevel - lastAudioLevelRef.current) > 2) {
+      lastAudioLevelRef.current = audioLevel
+      notifyAudioLevel(audioLevel)
+    }
+  }, [status, audioLevel, notifyAudioLevel])
 
   // Copy transcription to clipboard
   const copyToClipboard = useCallback(async () => {
