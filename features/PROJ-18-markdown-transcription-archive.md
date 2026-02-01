@@ -1,6 +1,6 @@
 # PROJ-18: Markdown Transcription Archive
 
-## Status: 🔵 Planned (Post-MVP)
+## Status: ✅ Deployed (2026-02-01)
 
 ## Beschreibung
 Automatisches Speichern jeder Transkription als Markdown-Datei. Obsidian-kompatibel mit YAML-Frontmatter für einfache Organisation und Durchsuchbarkeit.
