@@ -1,6 +1,6 @@
 # PROJ-4: Whisper.cpp Integration
 
-## Status: 🔵 Planned
+## Status: ✅ Deployed (2026-02-01)
 
 ## Beschreibung
 Integration von Whisper.cpp für lokale, offline Speech-to-Text-Transkription. Verwaltet Modell-Download, -Laden und Inference.
