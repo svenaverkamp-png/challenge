@@ -1,304 +1,414 @@
-# AI Coding Starter Kit – Production-Ready Template
+# EverVoice
 
-> **Build scalable, production-ready web apps faster** with AI agents handling Requirements, Architecture, Development, QA, and Deployment.
+> **Lokale Voice-to-Text Desktop App** - Diktiere Text in jede Anwendung mit Whisper AI und automatischer Textverbesserung durch Ollama.
 
-This template includes everything you need for professional AI-powered development:
-- ✅ **Next.js 16** (latest) with TypeScript + Tailwind CSS
-- ✅ **6 Production-Ready AI Agents** (Requirements → Deployment)
-- ✅ **Production Guides** (Error Tracking, Security, Performance, Scaling)
-- ✅ **Feature Changelog System** (Agents know what already exists → Code Reuse)
-- ✅ **PM-Friendly** (No code in specs, automatic handoffs between agents)
-- ✅ **Supabase-Ready** (optional)
-- ✅ **shadcn/ui-Ready** (add components as needed)
-- ✅ **Vercel Deployment-Ready**
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)]()
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-blue)]()
+[![License](https://img.shields.io/badge/License-MIT-yellow)]()
+
+---
+
+## Highlights
+
+- **100% Lokal** - Alle Daten bleiben auf deinem Gerät. Keine Cloud, kein Internet erforderlich.
+- **Global Hotkey** - Drücke `Cmd+Shift+Space` in jeder App und diktiere.
+- **KI-Textverbesserung** - Entfernt Füllwörter, korrigiert Grammatik, setzt Satzzeichen.
+- **Kontext-Aware** - Erkennt E-Mail vs. Chat-Apps und passt den Ton automatisch an.
+- **Obsidian-Archiv** - Speichert alle Transkriptionen als durchsuchbare Markdown-Dateien.
+
+---
+
+## Features
+
+### Core Features
+
+| Feature | Beschreibung |
+|---------|--------------|
+| **Desktop App Shell** | Native macOS/Windows App mit System Tray, Autostart und Single-Instance |
+| **Global Hotkey** | System-weiter Push-to-Talk oder Toggle-Modus |
+| **Audio Recording** | 16kHz Mono-Aufnahme mit Mikrofon-Auswahl und Pegel-Anzeige |
+| **Whisper Integration** | Lokale Speech-to-Text mit whisper.cpp (Tiny/Small/Medium Modelle) |
+| **Floating Overlay** | Schwebendes Mini-Fenster zeigt Recording-Status und Timer |
+| **Direct Text Insert** | Fügt Text direkt per Tastatur-Simulation in die aktive App ein |
+
+### AI Features
+
+| Feature | Beschreibung |
+|---------|--------------|
+| **AI Auto-Edits** | Ollama-Integration für Füllwort-Entfernung, Grammatik, Rechtschreibung |
+| **Context Awareness** | Erkennt aktive App (60+ Apps gemappt) und passt Verarbeitung an |
+| **E-Mail Context** | Formeller Ton, automatische Anrede und Grußformel |
+| **Chat Context** | Lockerer Ton, kurze Sätze, optionale Emojis |
+
+### System Features
+
+| Feature | Beschreibung |
+|---------|--------------|
+| **Settings Panel** | Zentrale Einstellungen mit Sidebar-Navigation |
+| **Error Handling** | Toast-Benachrichtigungen, Retry-Funktionalität, System-Notifications |
+| **Markdown Archive** | Speichert Transkriptionen als Obsidian-kompatible Markdown-Dateien |
 
 ---
 
 ## Quick Start
 
-### 1. Clone & Install
+### Voraussetzungen
+
+- **Node.js** 18+
+- **Rust** 1.77+
+- **Ollama** (optional, für KI-Textverbesserung): [ollama.com](https://ollama.com)
+
+### Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ai-coding-starter-kit.git my-project
-cd my-project
+# Repository klonen
+git clone https://github.com/YOUR_USERNAME/evervoice.git
+cd evervoice
+
+# Dependencies installieren
 npm install
+
+# Development Server starten
+npm run tauri:dev
 ```
 
-### 2. (Optional) Supabase Setup
-
-If you need a backend:
-
-1. Create Supabase Project: [supabase.com](https://supabase.com)
-2. Copy `.env.local.example` to `.env.local`
-3. Add your Supabase credentials
-4. Activate Supabase Client in `src/lib/supabase.ts` (uncomment code)
-
-**Skip this step** if you're building frontend-only (landing pages, portfolios, etc.)
-
-### 3. Start Development Server
+### Ollama Setup (optional)
 
 ```bash
-npm run dev
+# Ollama installieren (macOS)
+brew install ollama
+
+# Ollama starten
+ollama serve
+
+# Empfohlenes Modell herunterladen
+ollama pull llama3.2:3b
 ```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### 4. Use AI Agents
-
-⚠️ **Important:** Agents are **not Skills** – you can't call them with `/requirements-engineer`!
-
-**How to use Agents:**
-
-```
-Hey Claude, read .claude/agents/requirements-engineer.md and create a feature spec for [your idea].
-```
-
-**Full Guide:** See [HOW_TO_USE_AGENTS.md](HOW_TO_USE_AGENTS.md)
-
-**Available Agents:**
-- `requirements-engineer.md` - Feature Specs with interactive questions
-- `solution-architect.md` - PM-friendly Tech Design (no code snippets)
-- `frontend-dev.md` - UI Components + Automatic Backend/QA Handoff
-- `backend-dev.md` - APIs + Database + **Performance Best Practices**
-- `qa-engineer.md` - Testing + Regression Tests
-- `devops.md` - Deployment + **Production-Ready Essentials**
-
----
-
-## Project Structure
-
-```
-ai-coding-starter-kit/
-├── .claude/
-│   └── agents/              ← 6 AI Agents (Production-Ready)
-├── features/                ← Feature Specs (includes specs, test results, deployment status)
-│   └── README.md
-├── src/
-│   ├── app/                 ← Pages (Next.js App Router)
-│   │   ├── layout.tsx
-│   │   ├── page.tsx
-│   │   └── globals.css
-│   ├── components/          ← React Components
-│   │   └── ui/              ← shadcn/ui components (add as needed)
-│   └── lib/                 ← Utility functions
-│       ├── supabase.ts      ← Supabase Client (commented out by default)
-│       └── utils.ts
-├── public/                  ← Static files
-├── PROJECT_CONTEXT.md       ← Project Documentation (fill this out!)
-├── TEMPLATE_CHANGELOG.md    ← Template Version History (v1.0 - v1.3)
-├── HOW_TO_USE_AGENTS.md     ← Agent Usage Guide
-├── .env.local.example       ← Environment Variables Template
-└── package.json
-```
-
----
-
-## Production-Ready Features ⚡
-
-This template includes production-readiness guides integrated into the agents:
-
-### DevOps Agent includes:
-- **Error Tracking Setup** (Sentry) – 5-minute setup with code examples
-- **Security Headers** (XSS/Clickjacking Protection) – Copy-paste `next.config.js`
-- **Environment Variables Best Practices** – Secrets management
-- **Performance Monitoring** (Lighthouse) – Built-in Chrome DevTools
-
-### Backend Agent includes:
-- **Database Indexing** – Make queries 10-100x faster
-- **Query Optimization** – Avoid N+1 problems with Supabase joins
-- **Caching Strategy** – Next.js `unstable_cache` examples
-- **Input Validation** – Zod schemas for API safety
-- **Rate Limiting** – Optional Upstash Redis setup
-
-All guides are **practical** with **copy-paste code examples** – no theory!
-
----
-
-## Agent-Team Workflow
-
-### 1. Requirements Phase
-```bash
-# Tell Claude:
-"Read .claude/agents/requirements-engineer.md and create a feature spec for [your idea]"
-```
-
-Agent asks questions → You answer → Agent creates Feature Spec in `/features/PROJ-1-feature.md`
-
-### 2. Architecture Phase
-```bash
-# Tell Claude:
-"Read .claude/agents/solution-architect.md and design the architecture for /features/PROJ-1-feature.md"
-```
-
-Agent designs PM-friendly Tech Design (no code!) → You review
-
-### 3. Implementation Phase
-```bash
-# Frontend:
-"Read .claude/agents/frontend-dev.md and implement /features/PROJ-1-feature.md"
-
-# Backend (if using Supabase):
-"Read .claude/agents/backend-dev.md and implement /features/PROJ-1-feature.md"
-```
-
-**Note:** Frontend Agent automatically checks if Backend is needed and hands off to QA when done!
-
-### 4. Testing Phase
-```bash
-# Tell Claude:
-"Read .claude/agents/qa-engineer.md and test /features/PROJ-1-feature.md"
-```
-
-Agent tests all Acceptance Criteria → Adds test results to feature spec
-
-### 5. Deployment Phase
-```bash
-# Tell Claude:
-"Read .claude/agents/devops.md and deploy to Vercel"
-```
-
-Agent guides you through deployment + Production-Ready setup (Error Tracking, Security, Performance)
 
 ---
 
 ## Tech Stack
 
-| Category | Tool | Why? |
-|----------|------|------|
-| **Framework** | Next.js 16 | React + Server Components + Routing |
-| **Language** | TypeScript | Type Safety |
-| **Styling** | Tailwind CSS | Utility-First CSS |
-| **UI Library** | shadcn/ui | Copy-Paste Components |
-| **Backend** | Supabase (optional) | PostgreSQL + Auth + Storage |
-| **Deployment** | Vercel | Zero-Config Next.js Hosting |
-| **Error Tracking** | Sentry (optional) | Production Error Monitoring |
+| Kategorie | Technologie | Warum? |
+|-----------|-------------|--------|
+| **Desktop** | Tauri 2.0 | 10x kleiner als Electron, native Performance |
+| **Frontend** | Next.js 16 + React 19 | Modernes UI mit App Router |
+| **Styling** | Tailwind CSS + shadcn/ui | Konsistentes, modernes Design |
+| **Backend** | Rust | Systemzugriff, Audio-Verarbeitung, Performance |
+| **Speech-to-Text** | whisper.cpp | Lokale Transkription, GPU-beschleunigt |
+| **LLM** | Ollama | Lokale KI-Textverbesserung |
 
----
+### Rust Dependencies
 
-## Next Steps
+```toml
+# Audio
+cpal = "0.15"          # Plattformübergreifende Audio-Aufnahme
+hound = "3.5"          # WAV-Export
+rubato = "0.15"        # Audio-Resampling
 
-1. **Fill out PROJECT_CONTEXT.md**
-   - Define your vision
-   - Add features to roadmap
+# Whisper
+whisper-rs = "0.11"    # Rust-Bindings für whisper.cpp
 
-2. **Build your first feature**
-   - Use Requirements Engineer for Feature Spec
-   - Follow the Agent-Team workflow
-
-3. **Add shadcn/ui components** (as needed)
-   ```bash
-   npx shadcn@latest add button
-   npx shadcn@latest add card
-   # etc.
-   ```
-
-4. **Production Setup** (first deployment)
-   - Follow DevOps Agent guides:
-     - Error Tracking (Sentry) – 5 minutes
-     - Security Headers (`next.config.js`) – Copy-paste
-     - Performance Check (Lighthouse) – Chrome DevTools
-
-5. **Deploy**
-   - Push to GitHub
-   - Connect with Vercel
-   - Use DevOps Agent for deployment help
-
----
-
-## What's Included
-
-### ✅ Works out-of-the-box
-
-- Next.js 16 with App Router
-- TypeScript (strict mode)
-- Tailwind CSS (configured)
-- ESLint 9 (Next.js defaults)
-- 6 Production-Ready AI Agents
-- Feature Changelog System (Code-Reuse!)
-- Project Structure (best practices)
-- Environment Variables Setup
-- .gitignore (Node modules, .env, etc.)
-
-### 📦 You add yourself
-
-- shadcn/ui Components (as needed)
-- Supabase Setup (optional)
-- Your Features (with Agent-Team)
-- Production Setup (Error Tracking, Security Headers)
-
----
-
-## Why This Template?
-
-### For Product Managers
-- **No deep tech background needed** – Agents explain in PM-friendly language
-- **Automatic handoffs** – Frontend → Backend Check → QA (no manual coordination)
-- **Production-ready** – Security, Performance, Error Tracking included
-
-### For Solo Founders
-- **Build faster** – Agents handle Requirements → Deployment
-- **Built for scale** – Database indexing, query optimization, caching
-- **MVP to Production** – One template for both
-
-### For Small Teams (2-5 people)
-- **Consistent workflow** – Everyone follows the same agent system
-- **Code reuse** – Git history shows what exists, prevents duplication
-- **Knowledge sharing** – All decisions documented in Feature Specs
-
----
-
-## Documentation
-
-### Template Docs
-- [HOW_TO_USE_AGENTS.md](HOW_TO_USE_AGENTS.md) – Agent usage guide
-- [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) – Project documentation template
-- [TEMPLATE_CHANGELOG.md](TEMPLATE_CHANGELOG.md) – Template version history
-- [features/README.md](features/README.md) – Feature spec format
-
-### External Docs
-- [Next.js Docs](https://nextjs.org/docs)
-- [Tailwind CSS Docs](https://tailwindcss.com/docs)
-- [shadcn/ui Docs](https://ui.shadcn.com)
-- [Supabase Docs](https://supabase.com/docs)
-
----
-
-## Scripts
-
-```bash
-npm run dev        # Start development server (localhost:3000)
-npm run build      # Production build
-npm run start      # Start production server
-npm run lint       # Run ESLint
+# System
+enigo = "0.2"          # Keyboard-Simulation
+arboard = "3"          # Clipboard-Zugriff
 ```
 
 ---
 
-## Template Versions
+## Architektur
 
-**Current:** v1.4.0 (Git-Based Workflow)
-
-See [TEMPLATE_CHANGELOG.md](TEMPLATE_CHANGELOG.md) for full version history.
-
-**Updates:**
-- v1.4.0 – Git-Based Workflow (removed FEATURE_CHANGELOG, test-reports)
-- v1.3.0 – Production-Ready Guides (Error Tracking, Security, Performance)
-- v1.2.0 – Agent System Improvements (Interactive Questions, PM-Friendly Output)
-- v1.1.0 – Enhanced Documentation
-- v1.0.0 – Initial Release
+```
+EverVoice
+├── Tauri Backend (Rust)
+│   ├── Audio Recording (cpal)
+│   ├── Whisper Transcription (whisper-rs)
+│   ├── Ollama Integration (HTTP API)
+│   ├── Context Detection (AppleScript/PowerShell)
+│   ├── Text Insert (enigo/arboard)
+│   └── Markdown Archive (async fs)
+│
+├── React Frontend (Next.js)
+│   ├── Settings Panel
+│   ├── Recording Overlay
+│   └── System Tray Menu
+│
+└── System Integration
+    ├── Global Hotkey (tauri-plugin-global-shortcut)
+    ├── System Notifications (tauri-plugin-notification)
+    └── Autostart (tauri-plugin-autostart)
+```
 
 ---
 
-## License
+## Feature Details
 
-MIT License – feel free to use for your projects!
+### PROJ-1: Desktop App Shell & System Tray
+
+Die Basis-Infrastruktur der Desktop-Anwendung. Die App läuft als Hintergrund-Prozess mit System-Tray-Integration.
+
+- System Tray Icon mit Status-Anzeige (Idle, Recording, Processing, Error)
+- Autostart beim Systemstart (optional)
+- Single-Instance-Lock verhindert mehrere App-Instanzen
+- Background-Mode ohne sichtbares Hauptfenster
+
+### PROJ-2: Global Hotkey System
+
+System-weite Tastenkombinationen, die in jeder App funktionieren.
+
+- **Push-to-Talk**: Taste gedrückt halten zum Aufnehmen
+- **Toggle-Mode**: Einmal drücken zum Starten, erneut zum Stoppen
+- Default: `Cmd+Shift+Space` (Mac) / `Ctrl+Shift+Space` (Windows)
+- Hotkey in Settings konfigurierbar
+- Escape bricht Aufnahme ab
+
+### PROJ-3: Audio Recording
+
+Aufnahme über das System-Mikrofon mit Whisper-kompatiblem Output.
+
+- 16kHz Mono WAV-Export (optimal für Whisper)
+- Mikrofon-Auswahl aus verfügbaren Devices
+- Live-Pegel-Anzeige während Aufnahme
+- 6 Minuten Zeitlimit (konfigurierbar 1-10 Min)
+- Automatische Speicherbereinigung (Privacy-Mode)
+
+### PROJ-4: Whisper.cpp Integration
+
+Lokale, offline Speech-to-Text-Transkription.
+
+- **Whisper Tiny** (~75MB): Schnell, weniger genau
+- **Whisper Small** (~500MB): Gute Balance (Default)
+- **Whisper Medium** (~1.5GB): Sehr genau, langsamer
+- Modell-Download mit Fortschrittsanzeige
+- GPU-Beschleunigung (Metal auf macOS)
+- Auto-Spracherkennung (Deutsch/Englisch)
+
+### PROJ-5: Floating Recording Overlay
+
+Schwebendes Mini-Fenster während der Aufnahme.
+
+- Always-on-top, kein Focus-Steal
+- Pulsierender roter Punkt während Recording
+- Audio-Pegel-Meter (Grün → Gelb → Rot)
+- Timer mit Warnung bei 5:30
+- Status-Wechsel Animation (Recording → Processing → Done)
+
+### PROJ-6: Direct Text Insert
+
+Automatisches Einfügen in das aktive Textfeld.
+
+- Clipboard + Cmd/Ctrl+V Simulation (schnell)
+- Keyboard-Simulation als Fallback
+- Original-Clipboard wird gesichert und wiederhergestellt
+- Terminal-sichere Newline-Entfernung
+- Timeout-basierter Fallback
+
+### PROJ-7: AI Auto-Edits (Ollama)
+
+Automatische Textverbesserung durch lokales LLM.
+
+**Korrekturen:**
+- Füllwörter entfernen (ähm, also, halt, sozusagen)
+- Grammatik korrigieren
+- Rechtschreibung prüfen
+- Satzzeichen setzen
+- Groß-/Kleinschreibung
+
+**Ollama-Modelle:**
+- llama3.2:3b (Default, schnell)
+- mistral:7b (genauer)
+- Benutzerdefinierte Modelle
+
+### PROJ-8: Context Awareness Engine
+
+Erkennt die aktive Anwendung und Kategorie.
+
+**Kategorien:**
+- `email`: Gmail, Outlook, Apple Mail, Thunderbird
+- `chat`: Slack, Teams, Discord, WhatsApp, Telegram
+- `social`: LinkedIn, Twitter/X, Facebook
+- `code`: VS Code, Cursor, IntelliJ, Xcode
+- `docs`: Google Docs, Notion, Word
+- `browser`: Chrome, Safari, Firefox, Arc
+- `notes`: Apple Notes, Obsidian, Bear
+- `terminal`: Terminal, iTerm2, Hyper
+
+**60+ Apps** vordefiniert, eigene Mappings möglich.
+
+### PROJ-9: E-Mail Context Rules
+
+Kontextspezifische Verarbeitung für E-Mail-Apps.
+
+- Formeller, professioneller Ton
+- Automatische Anrede erkennen und formatieren
+- Standard-Grußformel konfigurierbar
+- Name für Signatur aus Settings
+- Englische E-Mail-Konventionen bei EN-Diktat
+
+### PROJ-10: Chat Context Rules
+
+Kontextspezifische Verarbeitung für Chat-Apps.
+
+- Lockerer, informeller Ton
+- Kurze Sätze und Absätze
+- Keine formellen Anreden/Grußformeln
+- Optionale Emoji-Einfügung
+- @Mentions formatieren ("at Thomas" → "@Thomas")
+
+### PROJ-11: Settings Panel
+
+Zentrale Einstellungs-Oberfläche.
+
+**Kategorien:**
+- **Allgemein**: Theme (Light/Dark/System), Autostart
+- **Hotkey**: Tastenkombination, Push-to-Talk/Toggle
+- **Audio**: Mikrofon, Zeitlimit, Pegel-Test
+- **Transkription**: Whisper-Modell, Sprache
+- **AI-Verarbeitung**: Ollama-Einstellungen, Korrekturen
+- **Kontext**: E-Mail/Chat-Modus Konfiguration
+- **Datenschutz**: Audio löschen, Telemetrie
+- **Archiv**: Speicherpfad, Ordnerstruktur
+
+Export/Import von Einstellungen als JSON.
+
+### PROJ-12: Error Handling & Notifications
+
+Zentrales Fehlerbehandlungs-System.
+
+- Toast-Notifications (Success, Error, Warning, Info)
+- Retry-Button bei retriable Errors
+- System-Notifications wenn App im Hintergrund
+- Error-Details Modal mit Copy-to-Clipboard
+- Lokales Logging mit Rotation
+
+### PROJ-18: Markdown Transcription Archive
+
+Automatisches Speichern als Obsidian-kompatible Dateien.
+
+**Dateiformat:**
+```markdown
+---
+date: 2024-01-15T14:32:00+01:00
+app: Slack
+category: chat
+duration: 45
+words: 127
+language: de
+edited: true
+tags:
+  - transkription
+  - voice
+---
+
+# Transkription vom 15. Januar 2024
+
+## Bearbeiteter Text
+[AI-bearbeiteter Text]
+
+## Originaltext
+<details>
+<summary>Original anzeigen</summary>
+[Unbearbeiteter Whisper-Output]
+</details>
+```
+
+**Features:**
+- Default-Ordner: `~/VoiceApp/transcriptions/`
+- Ordnerstruktur: Flat oder Jahr/Monat
+- Dateiname: `YYYY-MM-DD_HH-MM_appname_snippet.md`
+- Obsidian Dataview-kompatibel
 
 ---
 
-**Built with AI Agent Team System + Claude Code** 🚀
+## Screenshots
 
-Ready to build production-ready apps? Start with the Requirements Engineer!
+> *Screenshots werden hier eingefügt*
+
+---
+
+## Entwicklung
+
+### Projektstruktur
+
+```
+evervoice/
+├── src/                      # Next.js Frontend
+│   ├── app/
+│   │   ├── page.tsx          # Hauptseite
+│   │   ├── settings/         # Settings-Route
+│   │   └── overlay/          # Recording-Overlay
+│   ├── components/           # React-Komponenten
+│   ├── hooks/                # Custom Hooks
+│   └── lib/                  # Utilities
+├── src-tauri/                # Rust Backend
+│   ├── src/
+│   │   ├── lib.rs            # Tauri-Commands
+│   │   ├── audio.rs          # Audio-Recording
+│   │   ├── whisper.rs        # Whisper-Integration
+│   │   ├── ollama.rs         # Ollama-Integration
+│   │   ├── context.rs        # Context-Detection
+│   │   ├── text_insert.rs    # Text-Einfügung
+│   │   └── archive.rs        # Markdown-Archive
+│   ├── icons/                # App-Icons
+│   └── Cargo.toml            # Rust-Dependencies
+├── features/                 # Feature-Spezifikationen
+└── package.json
+```
+
+### Befehle
 
 ```bash
-"Read .claude/agents/requirements-engineer.md and create a feature spec for [your idea]"
+# Development
+npm run dev              # Next.js Dev Server
+npm run tauri:dev        # Tauri + Next.js Dev
+
+# Production
+npm run build            # Next.js Build
+npm run tauri:build      # Tauri App Build
+
+# Linting
+npm run lint             # ESLint
 ```
+
+---
+
+## Roadmap
+
+### Geplante Features
+
+- [ ] **PROJ-13**: Command Mode (Übersetzen, Zusammenfassen)
+- [ ] **PROJ-14**: Personal Dictionary (Fachbegriffe)
+- [ ] **PROJ-15**: Voice Commands ("Absatz", "neuer Satz")
+- [ ] **PROJ-16**: Snippet-Bibliothek
+- [ ] **PROJ-17**: Transkriptions-Historie mit Suche
+
+---
+
+## Beitragen
+
+Beiträge sind willkommen! Bitte erstelle einen Issue oder Pull Request.
+
+1. Fork das Repository
+2. Erstelle einen Feature-Branch (`git checkout -b feature/AmazingFeature`)
+3. Committe deine Änderungen (`git commit -m 'Add AmazingFeature'`)
+4. Push zum Branch (`git push origin feature/AmazingFeature`)
+5. Öffne einen Pull Request
+
+---
+
+## Lizenz
+
+MIT License - siehe [LICENSE](LICENSE) für Details.
+
+---
+
+## Acknowledgments
+
+- [Tauri](https://tauri.app/) - Desktop Framework
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) - Speech-to-Text
+- [Ollama](https://ollama.com/) - Lokale LLMs
+- [shadcn/ui](https://ui.shadcn.com/) - UI-Komponenten
+
+---
+
+**Built with Tauri, Whisper & Ollama**
