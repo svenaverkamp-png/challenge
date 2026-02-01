@@ -151,6 +151,41 @@ export default function Home() {
             showSuccess('Transkription fertig', `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`)
           }
 
+          // PROJ-18: Archive transcription to Markdown file (async, non-blocking)
+          // BUG-3 Fix: Copy to clipboard as fallback on archive error
+          try {
+            const archiveData = {
+              date: new Date().toISOString(),
+              app_name: context?.app_name || 'Desktop',
+              category: context?.category || 'other',
+              duration_seconds: Math.round(result.duration_ms / 1000),
+              word_count: finalText.split(/\s+/).filter(Boolean).length,
+              language: transcriptionResult.language || 'de',
+              was_edited: ollamaSettings.enabled && finalText !== transcriptionResult.text,
+              edited_text: finalText,
+              original_text: transcriptionResult.text,
+            }
+            invoke<{ success: boolean; error?: string }>('archive_transcription', { data: archiveData })
+              .then((archiveResult) => {
+                if (!archiveResult.success && archiveResult.error) {
+                  // BUG-3 Fix: Archive failed, ensure text is in clipboard as fallback
+                  console.warn('Archive failed, copying to clipboard as fallback:', archiveResult.error)
+                  navigator.clipboard.writeText(finalText).catch(() => {
+                    // Clipboard also failed - text should already be in clipboard from text insert
+                  })
+                  showWarning('Archivierung fehlgeschlagen', 'Text wurde in Zwischenablage kopiert.')
+                }
+              })
+              .catch((archiveErr) => {
+                // BUG-3 Fix: Archive failed, ensure text is in clipboard
+                console.warn('Archive failed (non-blocking):', archiveErr)
+                navigator.clipboard.writeText(finalText).catch(() => {})
+              })
+          } catch (archiveErr) {
+            // Archive errors are non-blocking - just log
+            console.warn('Archive error:', archiveErr)
+          }
+
           // PROJ-5: Notify overlay that transcription is done
           notifyDone()
         } else {

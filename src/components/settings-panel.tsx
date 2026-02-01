@@ -15,6 +15,7 @@ import { OllamaSettings } from '@/components/ollama-settings'
 import { ContextSettings } from '@/components/context-settings'
 import { EmailSettings } from '@/components/email-settings'
 import { ChatSettings } from '@/components/chat-settings'
+import { ArchiveSettings } from '@/components/archive-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -46,6 +47,9 @@ export function SettingsPanel() {
 
       {/* Chat Context Settings (PROJ-10) */}
       <ChatSettings />
+
+      {/* Archive Settings (PROJ-18) */}
+      <ArchiveSettings />
 
       {/* General Settings */}
       <Card>

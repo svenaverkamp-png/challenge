@@ -13,12 +13,14 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+mod archive;
 mod audio;
 mod context;
 mod ollama;
 mod text_insert;
 mod whisper;
 
+use archive::{ArchiveManager, ArchiveResult, ArchiveSettings, FolderStructure, TranscriptionData};
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
 use context::{AppCategory, AppContext, AppMapping, ContextConfig, ContextManager};
 use ollama::{AutoEditResult, ChatContextSettings, EmailContextSettings, OllamaManager, OllamaSettings, OllamaStatus};
@@ -63,7 +65,7 @@ impl Default for HotkeySettings {
     }
 }
 
-/// Managed state for current app status, crash detection, hotkey, audio, whisper, ollama, text insert, and context
+/// Managed state for current app status, crash detection, hotkey, audio, whisper, ollama, text insert, context, and archive
 pub struct AppState {
     current_status: Mutex<AppStatus>,
     had_previous_crash: Mutex<bool>,
@@ -87,6 +89,9 @@ pub struct AppState {
     email_settings: Mutex<EmailContextSettings>,
     // Chat context settings (PROJ-10)
     chat_settings: Mutex<ChatContextSettings>,
+    // Archive state (PROJ-18)
+    archive_manager: Mutex<ArchiveManager>,
+    archive_settings: Mutex<ArchiveSettings>,
 }
 
 impl Default for AppState {
@@ -108,6 +113,8 @@ impl Default for AppState {
             context_manager: Mutex::new(ContextManager::new()),
             email_settings: Mutex::new(EmailContextSettings::default()),
             chat_settings: Mutex::new(ChatContextSettings::default()),
+            archive_manager: Mutex::new(ArchiveManager::new()),
+            archive_settings: Mutex::new(ArchiveSettings::default()),
         }
     }
 }
@@ -1262,6 +1269,84 @@ async fn set_chat_settings(
     Ok(())
 }
 
+// ============================================================================
+// Archive Commands (PROJ-18)
+// ============================================================================
+
+/// Get current archive settings
+#[tauri::command]
+async fn get_archive_settings(state: State<'_, AppState>) -> Result<ArchiveSettings, String> {
+    let settings = state.archive_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update archive settings
+#[tauri::command]
+async fn set_archive_settings(
+    state: State<'_, AppState>,
+    settings: ArchiveSettings,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.archive_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Update manager
+    {
+        let mut manager = state.archive_manager.lock().map_err(|e| e.to_string())?;
+        manager.update_settings(settings.clone());
+    }
+
+    // Persist to config file
+    archive::save_settings(&settings)?;
+
+    log::info!("Archive settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Archive a transcription to a Markdown file
+#[tauri::command]
+async fn archive_transcription<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    data: TranscriptionData,
+) -> Result<ArchiveResult, String> {
+    let manager = state.archive_manager.lock().map_err(|e| e.to_string())?;
+
+    let result = manager.archive_transcription(&data);
+
+    // Emit appropriate events
+    if result.success {
+        if let Some(ref path) = result.file_path {
+            let _ = app.emit("archive-success", path);
+            log::info!("Transcription archived successfully: {}", path);
+        }
+    } else if let Some(ref error) = result.error {
+        let _ = app.emit("archive-error", error);
+        log::warn!("Failed to archive transcription: {}", error);
+    }
+
+    Ok(result)
+}
+
+/// Check if a path is writable for archiving
+#[tauri::command]
+async fn check_archive_path(state: State<'_, AppState>, path: String) -> Result<bool, String> {
+    let manager = state.archive_manager.lock().map_err(|e| e.to_string())?;
+    manager.check_path_writable(&path)
+}
+
+/// Get the default archive path
+#[tauri::command]
+async fn get_default_archive_path() -> Result<String, String> {
+    let default_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("VoiceApp")
+        .join("transcriptions");
+    Ok(default_path.to_string_lossy().to_string())
+}
+
 /// Register a global hotkey
 fn register_global_hotkey<R: Runtime>(
     app: &tauri::AppHandle<R>,
@@ -1703,6 +1788,7 @@ async fn export_all_settings(state: State<'_, AppState>) -> Result<String, Strin
             "ollama": state.ollama_settings.lock().map_err(|e| e.to_string())?.clone(),
             "email": state.email_settings.lock().map_err(|e| e.to_string())?.clone(),
             "chat": state.chat_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "archive": state.archive_settings.lock().map_err(|e| e.to_string())?.clone(),
         }
     });
 
@@ -1785,6 +1871,16 @@ async fn import_all_settings(state: State<'_, AppState>, config: String) -> Resu
         }
     }
 
+    if let Some(archive) = settings.get("archive") {
+        if let Ok(s) = serde_json::from_value::<ArchiveSettings>(archive.clone()) {
+            archive::save_settings(&s)?;
+            let mut current = state.archive_settings.lock().map_err(|e| e.to_string())?;
+            *current = s.clone();
+            let mut manager = state.archive_manager.lock().map_err(|e| e.to_string())?;
+            manager.update_settings(s);
+        }
+    }
+
     log::info!("Settings imported successfully");
     Ok(())
 }
@@ -1840,6 +1936,14 @@ async fn reset_category_settings(state: State<'_, AppState>, category: String) -
         "privacy" => {
             let default = PrivacySettings::default();
             save_privacy_settings(&default)?;
+        }
+        "archive" => {
+            let default = ArchiveSettings::default();
+            archive::save_settings(&default)?;
+            let mut current = state.archive_settings.lock().map_err(|e| e.to_string())?;
+            *current = default.clone();
+            let mut manager = state.archive_manager.lock().map_err(|e| e.to_string())?;
+            manager.update_settings(default);
         }
         _ => {
             return Err(format!("Unknown category: {}", category));
@@ -1911,7 +2015,11 @@ pub fn run() {
     // Load chat context settings (PROJ-10)
     let chat_settings = ollama::load_chat_settings();
 
-    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, context, email, and chat
+    // Load archive settings (PROJ-18)
+    let archive_settings = archive::load_settings();
+    let archive_manager = ArchiveManager::with_settings(archive_settings.clone());
+
+    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, context, email, chat, and archive
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -1929,6 +2037,8 @@ pub fn run() {
         context_manager: Mutex::new(context_manager),
         email_settings: Mutex::new(email_settings),
         chat_settings: Mutex::new(chat_settings),
+        archive_manager: Mutex::new(archive_manager),
+        archive_settings: Mutex::new(archive_settings),
     };
 
     if had_crash {
@@ -2056,7 +2166,13 @@ pub fn run() {
             set_privacy_settings,
             export_all_settings,
             import_all_settings,
-            reset_category_settings
+            reset_category_settings,
+            // Archive commands (PROJ-18)
+            get_archive_settings,
+            set_archive_settings,
+            archive_transcription,
+            check_archive_path,
+            get_default_archive_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
