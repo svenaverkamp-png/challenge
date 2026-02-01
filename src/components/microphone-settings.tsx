@@ -12,7 +12,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTauri } from '@/hooks/use-tauri'
-import { Mic, MicOff, Volume2, Shield, Clock, AlertCircle, RefreshCw } from 'lucide-react'
+import { Mic, MicOff, Volume2, Shield, Clock, AlertCircle, RefreshCw, AlertTriangle } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 /** Audio device info from backend */
@@ -41,6 +42,8 @@ export function MicrophoneSettings() {
   const [error, setError] = useState<string | null>(null)
   const [isTesting, setIsTesting] = useState(false)
   const [testLevel, setTestLevel] = useState(0)
+  const [deviceDisconnected, setDeviceDisconnected] = useState(false)
+  const [previousDeviceId, setPreviousDeviceId] = useState<string | null>(null)
 
   // Load devices and settings
   const loadData = useCallback(async () => {
@@ -68,6 +71,54 @@ export function MicrophoneSettings() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // Monitor for device changes (BUG-2 fix)
+  useEffect(() => {
+    if (!isTauri) return
+
+    // Store the currently selected device ID
+    if (settings.device_id && !previousDeviceId) {
+      setPreviousDeviceId(settings.device_id)
+    }
+
+    // Check for device changes every 3 seconds
+    const checkDevices = async () => {
+      try {
+        const currentDevices = await invoke<AudioDevice[]>('list_audio_devices')
+
+        // Check if selected device is still available
+        if (settings.device_id) {
+          const selectedExists = currentDevices.some(d => d.id === settings.device_id)
+          if (!selectedExists && !deviceDisconnected) {
+            setDeviceDisconnected(true)
+            toast.warning('Mikrofon getrennt', {
+              description: 'Das ausgewaehlte Mikrofon wurde getrennt. Wechsle zu Standard-Mikrofon.',
+              duration: 5000,
+            })
+            // Auto-fallback to default
+            await updateSettings({ device_id: null })
+            setDevices(currentDevices)
+          }
+        }
+
+        // Check if devices list changed (new device connected)
+        if (currentDevices.length !== devices.length) {
+          setDevices(currentDevices)
+          if (deviceDisconnected && currentDevices.length > devices.length) {
+            setDeviceDisconnected(false)
+            toast.success('Mikrofon verbunden', {
+              description: 'Ein neues Mikrofon wurde erkannt.',
+            })
+          }
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    }
+
+    const interval = setInterval(checkDevices, 3000)
+    return () => clearInterval(interval)
+  }, [isTauri, settings.device_id, devices.length, deviceDisconnected, previousDeviceId])
 
   // Update settings
   const updateSettings = async (newSettings: Partial<AudioSettings>) => {
@@ -184,6 +235,15 @@ export function MicrophoneSettings() {
           <Alert variant="destructive" className="border-destructive/30 bg-destructive/10">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {deviceDisconnected && (
+          <Alert className="border-yellow-500/30 bg-yellow-500/10">
+            <AlertTriangle className="h-4 w-4 text-yellow-600" />
+            <AlertDescription className="text-yellow-700">
+              Das zuvor ausgewaehlte Mikrofon wurde getrennt. Es wird jetzt das Standard-Mikrofon verwendet.
+            </AlertDescription>
           </Alert>
         )}
 

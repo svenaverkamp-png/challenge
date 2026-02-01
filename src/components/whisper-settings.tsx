@@ -22,7 +22,10 @@ import {
   Languages,
   HardDrive,
   X,
+  PlayCircle,
+  PauseCircle,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 /** Available Whisper models */
@@ -96,6 +99,19 @@ export function WhisperSettings() {
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [interruptedDownloads, setInterruptedDownloads] = useState<Record<string, number>>({})
+
+  // Load interrupted downloads from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('whisper-interrupted-downloads')
+    if (stored) {
+      try {
+        setInterruptedDownloads(JSON.parse(stored))
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, [])
 
   // Load settings and model status
   const loadData = useCallback(async () => {
@@ -182,6 +198,12 @@ export function WhisperSettings() {
 
       await invoke('download_whisper_model', { model })
 
+      // Clear any interrupted state for this model
+      const newInterrupted = { ...interruptedDownloads }
+      delete newInterrupted[model]
+      setInterruptedDownloads(newInterrupted)
+      localStorage.setItem('whisper-interrupted-downloads', JSON.stringify(newInterrupted))
+
       // Refresh status after download
       const status = await invoke<ModelStatus[]>('get_whisper_model_status')
       setModelStatus(status)
@@ -193,16 +215,50 @@ export function WhisperSettings() {
     }
   }
 
-  // Cancel download
+  // Cancel download (BUG-3 fix: save progress for resume)
   const cancelDownload = async () => {
     if (!isTauri) return
 
     try {
+      // Save the current progress before canceling
+      if (downloadProgress && downloadProgress.downloaded_bytes > 0) {
+        const newInterrupted = {
+          ...interruptedDownloads,
+          [downloadProgress.model]: downloadProgress.downloaded_bytes,
+        }
+        setInterruptedDownloads(newInterrupted)
+        localStorage.setItem('whisper-interrupted-downloads', JSON.stringify(newInterrupted))
+        toast.info('Download pausiert', {
+          description: `${formatBytes(downloadProgress.downloaded_bytes)} gespeichert. Klicke "Fortsetzen" um weiterzumachen.`,
+        })
+      }
       await invoke('cancel_whisper_download')
       setDownloadProgress(null)
     } catch (err) {
       console.error('Failed to cancel download:', err)
     }
+  }
+
+  // Resume download (BUG-3 fix)
+  const resumeDownload = async (model: WhisperModel) => {
+    // Clear the interrupted state for this model
+    const newInterrupted = { ...interruptedDownloads }
+    delete newInterrupted[model]
+    setInterruptedDownloads(newInterrupted)
+    localStorage.setItem('whisper-interrupted-downloads', JSON.stringify(newInterrupted))
+
+    // Start the download again (backend handles resume if supported)
+    await downloadModel(model)
+  }
+
+  // Check if a model has an interrupted download
+  const hasInterruptedDownload = (model: WhisperModel): boolean => {
+    return model in interruptedDownloads && interruptedDownloads[model] > 0
+  }
+
+  // Get interrupted download progress
+  const getInterruptedProgress = (model: WhisperModel): number => {
+    return interruptedDownloads[model] || 0
   }
 
   // Delete model
@@ -385,6 +441,28 @@ export function WhisperSettings() {
                 Löschen
               </Button>
             </div>
+          ) : hasInterruptedDownload(settings.model) ? (
+            // BUG-3 fix: Interrupted download - show resume button
+            <div className="flex items-center justify-between rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
+              <div className="flex items-center gap-2">
+                <PauseCircle className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="text-sm font-medium text-blue-700">Download pausiert</p>
+                  <p className="text-xs text-blue-600">
+                    {formatBytes(getInterruptedProgress(settings.model))} heruntergeladen
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => resumeDownload(settings.model)}
+                className="h-8 gap-1 border-blue-500/50 bg-blue-500/10 hover:bg-blue-500/20"
+              >
+                <PlayCircle className="h-4 w-4" />
+                Fortsetzen
+              </Button>
+            </div>
           ) : (
             // Model not downloaded
             <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4">
@@ -497,6 +575,8 @@ export function WhisperSettings() {
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
                     ) : isDownloading ? (
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    ) : hasInterruptedDownload(model) ? (
+                      <PauseCircle className="h-4 w-4 text-blue-500" />
                     ) : (
                       <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />
                     )}

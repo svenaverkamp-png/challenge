@@ -1573,6 +1573,283 @@ async fn hide_main_window<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), St
     Ok(())
 }
 
+// ============================================================================
+// General Settings Commands (PROJ-11)
+// ============================================================================
+
+/// General settings for the app
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct GeneralSettings {
+    pub theme: String, // "light", "dark", or "system"
+}
+
+/// Privacy settings for the app
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PrivacySettings {
+    pub delete_audio_after_processing: bool,
+    pub enable_telemetry: bool,
+}
+
+impl Default for PrivacySettings {
+    fn default() -> Self {
+        Self {
+            delete_audio_after_processing: true,
+            enable_telemetry: false,
+        }
+    }
+}
+
+/// Get the path to the general settings config file
+fn get_general_config_path() -> PathBuf {
+    let app_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.evervoice.app");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join("general_config.json")
+}
+
+/// Get the path to the privacy settings config file
+fn get_privacy_config_path() -> PathBuf {
+    let app_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.evervoice.app");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join("privacy_config.json")
+}
+
+/// Load general settings from config file
+fn load_general_settings() -> GeneralSettings {
+    let config_path = get_general_config_path();
+    if config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    GeneralSettings {
+        theme: "system".to_string(),
+    }
+}
+
+/// Save general settings to config file
+fn save_general_settings(settings: &GeneralSettings) -> Result<(), String> {
+    let config_path = get_general_config_path();
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&config_path, json).map_err(|e| e.to_string())
+}
+
+/// Load privacy settings from config file
+fn load_privacy_settings() -> PrivacySettings {
+    let config_path = get_privacy_config_path();
+    if config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    PrivacySettings::default()
+}
+
+/// Save privacy settings to config file
+fn save_privacy_settings(settings: &PrivacySettings) -> Result<(), String> {
+    let config_path = get_privacy_config_path();
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&config_path, json).map_err(|e| e.to_string())
+}
+
+/// Get current general settings
+#[tauri::command]
+async fn get_general_settings() -> Result<GeneralSettings, String> {
+    Ok(load_general_settings())
+}
+
+/// Update general settings
+#[tauri::command]
+async fn set_general_settings(settings: GeneralSettings) -> Result<(), String> {
+    save_general_settings(&settings)?;
+    log::info!("General settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Get current privacy settings
+#[tauri::command]
+async fn get_privacy_settings() -> Result<PrivacySettings, String> {
+    Ok(load_privacy_settings())
+}
+
+/// Update privacy settings
+#[tauri::command]
+async fn set_privacy_settings(settings: PrivacySettings) -> Result<(), String> {
+    save_privacy_settings(&settings)?;
+    log::info!("Privacy settings updated: {:?}", settings);
+    Ok(())
+}
+
+/// Export all settings as JSON string
+#[tauri::command]
+async fn export_all_settings(state: State<'_, AppState>) -> Result<String, String> {
+    let export = serde_json::json!({
+        "version": "1.0",
+        "exported_at": chrono::Local::now().to_rfc3339(),
+        "settings": {
+            "general": load_general_settings(),
+            "privacy": load_privacy_settings(),
+            "hotkey": state.hotkey_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "audio": state.audio_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "whisper": state.whisper_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "text_insert": state.text_insert_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "ollama": state.ollama_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "email": state.email_settings.lock().map_err(|e| e.to_string())?.clone(),
+            "chat": state.chat_settings.lock().map_err(|e| e.to_string())?.clone(),
+        }
+    });
+
+    serde_json::to_string_pretty(&export).map_err(|e| e.to_string())
+}
+
+/// Import all settings from JSON string
+#[tauri::command]
+async fn import_all_settings(state: State<'_, AppState>, config: String) -> Result<(), String> {
+    let import: serde_json::Value = serde_json::from_str(&config).map_err(|e| e.to_string())?;
+
+    let settings = import.get("settings").ok_or("Invalid config format: missing 'settings'")?;
+
+    // Import each category if present
+    if let Some(general) = settings.get("general") {
+        if let Ok(s) = serde_json::from_value::<GeneralSettings>(general.clone()) {
+            save_general_settings(&s)?;
+        }
+    }
+
+    if let Some(privacy) = settings.get("privacy") {
+        if let Ok(s) = serde_json::from_value::<PrivacySettings>(privacy.clone()) {
+            save_privacy_settings(&s)?;
+        }
+    }
+
+    if let Some(hotkey) = settings.get("hotkey") {
+        if let Ok(s) = serde_json::from_value::<HotkeySettings>(hotkey.clone()) {
+            save_hotkey_settings(&s)?;
+            let mut current = state.hotkey_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    if let Some(audio) = settings.get("audio") {
+        if let Ok(s) = serde_json::from_value::<AudioSettings>(audio.clone()) {
+            save_audio_settings(&s)?;
+            let mut current = state.audio_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    if let Some(whisper) = settings.get("whisper") {
+        if let Ok(s) = serde_json::from_value::<WhisperSettings>(whisper.clone()) {
+            save_whisper_settings(&s)?;
+            let mut current = state.whisper_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    if let Some(text_insert) = settings.get("text_insert") {
+        if let Ok(s) = serde_json::from_value::<TextInsertSettings>(text_insert.clone()) {
+            text_insert::save_settings(&s)?;
+            let mut current = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    if let Some(ollama) = settings.get("ollama") {
+        if let Ok(s) = serde_json::from_value::<OllamaSettings>(ollama.clone()) {
+            ollama::save_settings(&s)?;
+            let mut current = state.ollama_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    if let Some(email) = settings.get("email") {
+        if let Ok(s) = serde_json::from_value::<EmailContextSettings>(email.clone()) {
+            ollama::save_email_settings(&s)?;
+            let mut current = state.email_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    if let Some(chat) = settings.get("chat") {
+        if let Ok(s) = serde_json::from_value::<ChatContextSettings>(chat.clone()) {
+            ollama::save_chat_settings(&s)?;
+            let mut current = state.chat_settings.lock().map_err(|e| e.to_string())?;
+            *current = s;
+        }
+    }
+
+    log::info!("Settings imported successfully");
+    Ok(())
+}
+
+/// Reset settings for a specific category to defaults
+#[tauri::command]
+async fn reset_category_settings(state: State<'_, AppState>, category: String) -> Result<(), String> {
+    match category.as_str() {
+        "general" => {
+            let default = GeneralSettings { theme: "system".to_string() };
+            save_general_settings(&default)?;
+        }
+        "hotkey" => {
+            let default = HotkeySettings::default();
+            save_hotkey_settings(&default)?;
+            let mut current = state.hotkey_settings.lock().map_err(|e| e.to_string())?;
+            *current = default;
+        }
+        "audio" => {
+            let default = AudioSettings::default();
+            save_audio_settings(&default)?;
+            let mut current = state.audio_settings.lock().map_err(|e| e.to_string())?;
+            *current = default;
+        }
+        "transcription" => {
+            let default = WhisperSettings::default();
+            save_whisper_settings(&default)?;
+            let mut current = state.whisper_settings.lock().map_err(|e| e.to_string())?;
+            *current = default;
+        }
+        "ai" => {
+            let default_ollama = OllamaSettings::default();
+            ollama::save_settings(&default_ollama)?;
+            let mut current_ollama = state.ollama_settings.lock().map_err(|e| e.to_string())?;
+            *current_ollama = default_ollama;
+
+            let default_text_insert = TextInsertSettings::default();
+            text_insert::save_settings(&default_text_insert)?;
+            let mut current_text_insert = state.text_insert_settings.lock().map_err(|e| e.to_string())?;
+            *current_text_insert = default_text_insert;
+        }
+        "context" => {
+            let default_email = EmailContextSettings::default();
+            ollama::save_email_settings(&default_email)?;
+            let mut current_email = state.email_settings.lock().map_err(|e| e.to_string())?;
+            *current_email = default_email;
+
+            let default_chat = ChatContextSettings::default();
+            ollama::save_chat_settings(&default_chat)?;
+            let mut current_chat = state.chat_settings.lock().map_err(|e| e.to_string())?;
+            *current_chat = default_chat;
+        }
+        "privacy" => {
+            let default = PrivacySettings::default();
+            save_privacy_settings(&default)?;
+        }
+        _ => {
+            return Err(format!("Unknown category: {}", category));
+        }
+    }
+
+    log::info!("Settings reset for category: {}", category);
+    Ok(())
+}
+
 /// Get autostart status
 #[tauri::command]
 async fn get_autostart_status<R: Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
@@ -1673,6 +1950,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         // Register managed state for app status tracking and crash detection
         .manage(initial_state)
         .setup(|app| {
@@ -1766,7 +2045,15 @@ pub fn run() {
             set_email_settings,
             // Chat context commands (PROJ-10)
             get_chat_settings,
-            set_chat_settings
+            set_chat_settings,
+            // General/Privacy settings commands (PROJ-11)
+            get_general_settings,
+            set_general_settings,
+            get_privacy_settings,
+            set_privacy_settings,
+            export_all_settings,
+            import_all_settings,
+            reset_category_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1341,6 +1341,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "thiserror 1.0.69",
  "tokio",
+ "url",
  "uuid",
  "whisper-rs",
 ]
