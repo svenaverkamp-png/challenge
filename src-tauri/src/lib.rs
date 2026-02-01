@@ -21,7 +21,7 @@ mod whisper;
 
 use audio::{AudioDevice, AudioError, AudioRecorder, AudioSettings, RecordingResult};
 use context::{AppCategory, AppContext, AppMapping, ContextConfig, ContextManager};
-use ollama::{AutoEditResult, EmailContextSettings, OllamaManager, OllamaSettings, OllamaStatus};
+use ollama::{AutoEditResult, ChatContextSettings, EmailContextSettings, OllamaManager, OllamaSettings, OllamaStatus};
 use text_insert::{InsertMethod, TextInsertResult, TextInsertSettings};
 use whisper::{
     DownloadProgress, ModelStatus, TranscriptionResult, WhisperError, WhisperLanguage,
@@ -85,6 +85,8 @@ pub struct AppState {
     context_manager: Mutex<ContextManager>,
     // Email context settings (PROJ-9)
     email_settings: Mutex<EmailContextSettings>,
+    // Chat context settings (PROJ-10)
+    chat_settings: Mutex<ChatContextSettings>,
 }
 
 impl Default for AppState {
@@ -105,6 +107,7 @@ impl Default for AppState {
             ollama_settings: Mutex::new(OllamaSettings::default()),
             context_manager: Mutex::new(ContextManager::new()),
             email_settings: Mutex::new(EmailContextSettings::default()),
+            chat_settings: Mutex::new(ChatContextSettings::default()),
         }
     }
 }
@@ -978,6 +981,7 @@ async fn check_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus,
 /// Improve text using Ollama (auto-edit)
 /// This is the main entry point for PROJ-7 text improvement
 /// PROJ-9: Added is_email_context parameter for context-aware processing
+/// PROJ-10: Added is_chat_context parameter for chat-aware processing
 #[tauri::command]
 async fn improve_text<R: Runtime>(
     app: tauri::AppHandle<R>,
@@ -985,6 +989,7 @@ async fn improve_text<R: Runtime>(
     text: String,
     language: String,
     is_email_context: Option<bool>,
+    is_chat_context: Option<bool>,
 ) -> Result<AutoEditResult, String> {
     let settings = {
         let s = state.ollama_settings.lock().map_err(|e| e.to_string())?;
@@ -1016,10 +1021,25 @@ async fn improve_text<R: Runtime>(
         None
     };
 
+    // PROJ-10: Get chat context settings if in chat context
+    let chat_context = if is_chat_context.unwrap_or(false) {
+        let chat_settings = state.chat_settings.lock().map_err(|e| e.to_string())?;
+        if chat_settings.enabled {
+            log::info!("Chat context detected, applying chat-specific rules");
+            Some(chat_settings.clone())
+        } else {
+            log::debug!("Chat context detected but chat rules are disabled");
+            None
+        }
+    } else {
+        None
+    };
+
     log::info!(
-        "Starting Ollama text improvement: {} chars, email_context: {}",
+        "Starting Ollama text improvement: {} chars, email_context: {}, chat_context: {}",
         text.len(),
-        email_context.is_some()
+        email_context.is_some(),
+        chat_context.is_some()
     );
 
     // Emit processing started event
@@ -1028,7 +1048,7 @@ async fn improve_text<R: Runtime>(
     let result = {
         let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
         manager
-            .improve_text(&text, &language, email_context.as_ref())
+            .improve_text(&text, &language, email_context.as_ref(), chat_context.as_ref())
             .await
     };
 
@@ -1209,6 +1229,36 @@ async fn set_email_settings(
     ollama::save_email_settings(&settings)?;
 
     log::info!("Email context settings updated: {:?}", settings);
+    Ok(())
+}
+
+// ============================================================================
+// Chat Context Commands (PROJ-10)
+// ============================================================================
+
+/// Get current chat context settings
+#[tauri::command]
+async fn get_chat_settings(state: State<'_, AppState>) -> Result<ChatContextSettings, String> {
+    let settings = state.chat_settings.lock().map_err(|e| e.to_string())?;
+    Ok(settings.clone())
+}
+
+/// Update chat context settings
+#[tauri::command]
+async fn set_chat_settings(
+    state: State<'_, AppState>,
+    settings: ChatContextSettings,
+) -> Result<(), String> {
+    // Save to state
+    {
+        let mut current = state.chat_settings.lock().map_err(|e| e.to_string())?;
+        *current = settings.clone();
+    }
+
+    // Persist to config file
+    ollama::save_chat_settings(&settings)?;
+
+    log::info!("Chat context settings updated: {:?}", settings);
     Ok(())
 }
 
@@ -1581,7 +1631,10 @@ pub fn run() {
     // Load email context settings (PROJ-9)
     let email_settings = ollama::load_email_settings();
 
-    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, context, and email
+    // Load chat context settings (PROJ-10)
+    let chat_settings = ollama::load_chat_settings();
+
+    // Create initial state with crash info, hotkey settings, audio, whisper, ollama, text insert, context, email, and chat
     let initial_state = AppState {
         current_status: Mutex::new(AppStatus::Idle),
         had_previous_crash: Mutex::new(had_crash),
@@ -1598,6 +1651,7 @@ pub fn run() {
         ollama_settings: Mutex::new(ollama_settings),
         context_manager: Mutex::new(context_manager),
         email_settings: Mutex::new(email_settings),
+        chat_settings: Mutex::new(chat_settings),
     };
 
     if had_crash {
@@ -1709,7 +1763,10 @@ pub fn run() {
             get_app_categories,
             // Email context commands (PROJ-9)
             get_email_settings,
-            set_email_settings
+            set_email_settings,
+            // Chat context commands (PROJ-10)
+            get_chat_settings,
+            set_chat_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -75,6 +75,42 @@ pub struct EmailContextSettings {
     pub signature: Option<String>,
 }
 
+/// Chat context settings (PROJ-10)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatContextSettings {
+    /// Whether chat context rules are enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Add emojis to messages (default: false)
+    #[serde(default)]
+    pub add_emojis: bool,
+    /// Maximum message length before splitting (default: 200)
+    #[serde(default = "default_max_message_length")]
+    pub max_message_length: usize,
+    /// Split long messages into multiple chunks
+    #[serde(default = "default_true")]
+    pub split_long_messages: bool,
+    /// Format mentions: "at Thomas" -> "@Thomas"
+    #[serde(default = "default_true")]
+    pub format_mentions: bool,
+}
+
+fn default_max_message_length() -> usize {
+    200
+}
+
+impl Default for ChatContextSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            add_emojis: false,
+            max_message_length: 200,
+            split_long_messages: true,
+            format_mentions: true,
+        }
+    }
+}
+
 /// Formality level for email context
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -392,11 +428,13 @@ impl OllamaManager {
     /// BUG-2 fix: Added spelling reform option
     /// SEC-2 fix: Uses delimiters to prevent prompt injection
     /// PROJ-9: Added email context support
+    /// PROJ-10: Added chat context support
     fn build_prompt(
         &self,
         text: &str,
         language: &str,
         email_context: Option<&EmailContextSettings>,
+        chat_context: Option<&ChatContextSettings>,
     ) -> String {
         let mut instructions = Vec::new();
         let is_german = language == "de" || language == "German" || language == "german";
@@ -468,11 +506,28 @@ impl OllamaManager {
             String::new()
         };
 
+        // PROJ-10: Build chat context instructions if applicable
+        let chat_instructions = if let Some(chat_settings) = chat_context {
+            if chat_settings.enabled {
+                self.build_chat_context_instructions(chat_settings, is_german, is_english)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        // Combine context instructions (only one should be active at a time)
+        let context_instructions = if !email_instructions.is_empty() {
+            email_instructions
+        } else {
+            chat_instructions
+        };
+
         format!(
             r#"Du bist ein präziser Text-Editor. Bearbeite den diktierten Text nach diesen Regeln:
 
-{}
-{}
+{}{}
 WICHTIG - STRIKTE REGELN:
 - Verändere NIEMALS die Bedeutung des Textes
 - Behalte den Stil des Sprechers
@@ -491,11 +546,92 @@ Der zu bearbeitende Text beginnt nach dem Marker und endet vor dem End-Marker:
 
 Gib NUR den korrigierten Text aus:"#,
             instructions_text,
-            email_instructions,
+            context_instructions,
             language,
             delimiter = TEXT_DELIMITER,
             text = sanitized_text
         )
+    }
+
+    /// Build chat-specific context instructions (PROJ-10)
+    fn build_chat_context_instructions(
+        &self,
+        settings: &ChatContextSettings,
+        is_german: bool,
+        is_english: bool,
+    ) -> String {
+        let emoji_instruction = if settings.add_emojis {
+            if is_german {
+                "Füge am Ende der Nachricht EIN passendes Emoji hinzu (z.B. 'Das ist super' → 'Das ist super 🎉', 'Ok' → 'Ok 👍'). Maximum 1 Emoji pro Nachricht."
+            } else {
+                "Add ONE appropriate emoji at the end of the message (e.g. 'That's great' → 'That's great 🎉', 'Ok' → 'Ok 👍'). Maximum 1 emoji per message."
+            }
+        } else {
+            if is_german {
+                "Füge KEINE Emojis hinzu."
+            } else {
+                "Do NOT add any emojis."
+            }
+        };
+
+        let mention_instruction = if settings.format_mentions {
+            if is_german {
+                "Formatiere Mentions: 'at Thomas' oder 'mention Thomas' → '@Thomas'"
+            } else {
+                "Format mentions: 'at Thomas' or 'mention Thomas' → '@Thomas'"
+            }
+        } else {
+            ""
+        };
+
+        if is_german {
+            format!(
+                r#"
+
+KONTEXT: Chat-Anwendung erkannt (Slack, Teams, Discord, WhatsApp, etc.).
+
+ZUSÄTZLICHE CHAT-REGELN:
+6. Verwende einen lockeren, informellen Ton
+7. Kurze Sätze und Absätze (max 2-3 Sätze pro Nachricht)
+8. KEINE formellen Anreden oder Grußformeln:
+   - "Sehr geehrter" → "Hey" oder entfernen
+   - "Guten Tag" → "Hey" oder "Hi" (wenn passend)
+   - "Mit freundlichen Grüßen" → Entfernen (kein Ersatz)
+   - "Viele Grüße" / "VG" / "LG" → Entfernen für Chat
+   - "Danke" am Ende → Beibehalten
+9. Behalte natürliche Ausdrucksweise und lockere Sprache bei
+10. {}
+11. {}
+12. Bei längeren Texten: Aufteilen in logische Absätze (max 100 Wörter pro Block)
+13. Code-Snippets in Backticks formatieren: `function()` oder ```code block```
+14. KEINE E-Mail-Struktur verwenden
+"#,
+                emoji_instruction, mention_instruction
+            )
+        } else {
+            format!(
+                r#"
+
+CONTEXT: Chat application detected (Slack, Teams, Discord, WhatsApp, etc.).
+
+ADDITIONAL CHAT RULES:
+6. Use a casual, informal tone
+7. Short sentences and paragraphs (max 2-3 sentences per message)
+8. NO formal greetings or closings:
+   - "Dear Sir/Madam" → "Hey" or remove
+   - "Hello" → "Hey" or "Hi" (if appropriate)
+   - "Best regards" / "Kind regards" → Remove (no replacement)
+   - "Thanks" at the end → Keep
+9. Maintain natural, conversational language
+10. {}
+11. {}
+12. For longer texts: Split into logical paragraphs (max 100 words per block)
+13. Format code snippets in backticks: `function()` or ```code block```
+14. Do NOT use email structure
+"#,
+                emoji_instruction, mention_instruction
+            )
+        }
     }
 
     /// Build email-specific context instructions (PROJ-9)
@@ -608,11 +744,13 @@ ADDITIONAL EMAIL RULES:
     /// SEC-1 fix: URL validation
     /// BUG-5 fix: Chunking for long texts
     /// PROJ-9: Added email_context parameter for context-aware processing
+    /// PROJ-10: Added chat_context parameter for chat-aware processing
     pub async fn improve_text(
         &self,
         text: &str,
         language: &str,
         email_context: Option<&EmailContextSettings>,
+        chat_context: Option<&ChatContextSettings>,
     ) -> Result<AutoEditResult, OllamaError> {
         let start_time = std::time::Instant::now();
 
@@ -661,7 +799,7 @@ ADDITIONAL EMAIL RULES:
                 chunk.split_whitespace().count()
             );
 
-            let prompt = self.build_prompt(chunk, language, email_context);
+            let prompt = self.build_prompt(chunk, language, email_context, chat_context);
 
             let request = OllamaRequest {
                 model: self.settings.model.clone(),
@@ -856,6 +994,49 @@ pub fn save_email_settings(settings: &EmailContextSettings) -> Result<(), String
     Ok(())
 }
 
+// ============================================================================
+// Chat Context Settings (PROJ-10)
+// ============================================================================
+
+/// Get the path to the chat context config file
+pub fn get_chat_config_path() -> PathBuf {
+    let app_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("com.evervoice.app");
+    let _ = fs::create_dir_all(&app_dir);
+    app_dir.join("chat_config.json")
+}
+
+/// Load chat context settings from config file
+pub fn load_chat_settings() -> ChatContextSettings {
+    let config_path = get_chat_config_path();
+    if config_path.exists() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    ChatContextSettings::default()
+}
+
+/// Save chat context settings to config file
+pub fn save_chat_settings(settings: &ChatContextSettings) -> Result<(), String> {
+    let config_path = get_chat_config_path();
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&config_path, &json).map_err(|e| e.to_string())?;
+
+    // Set restrictive permissions (owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        fs::set_permissions(&config_path, permissions).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,7 +1053,7 @@ mod tests {
     #[test]
     fn test_build_prompt_german() {
         let manager = OllamaManager::new();
-        let prompt = manager.build_prompt("test text", "de", None);
+        let prompt = manager.build_prompt("test text", "de", None, None);
         assert!(prompt.contains("test text"));
         assert!(prompt.contains("Füllwörter"));
         assert!(prompt.contains(TEXT_DELIMITER));
@@ -881,7 +1062,7 @@ mod tests {
     #[test]
     fn test_build_prompt_english() {
         let manager = OllamaManager::new();
-        let prompt = manager.build_prompt("test text", "en", None);
+        let prompt = manager.build_prompt("test text", "en", None, None);
         assert!(prompt.contains("test text"));
         // BUG-1 fix: English filler words should be in prompt
         assert!(prompt.contains("um, uh, like, you know"));
@@ -898,7 +1079,7 @@ mod tests {
             auto_add_greeting: true,
             signature: None,
         };
-        let prompt = manager.build_prompt("test text", "de", Some(&email_settings));
+        let prompt = manager.build_prompt("test text", "de", Some(&email_settings), None);
         assert!(prompt.contains("E-Mail-Anwendung erkannt"));
         assert!(prompt.contains("formellen"));
         assert!(prompt.contains("Mit freundlichen Grüßen"));
@@ -912,9 +1093,51 @@ mod tests {
             enabled: false,
             ..Default::default()
         };
-        let prompt = manager.build_prompt("test text", "de", Some(&email_settings));
+        let prompt = manager.build_prompt("test text", "de", Some(&email_settings), None);
         // Email context disabled, so no email instructions should appear
         assert!(!prompt.contains("E-Mail-Anwendung erkannt"));
+    }
+
+    #[test]
+    fn test_build_prompt_with_chat_context() {
+        let manager = OllamaManager::new();
+        let chat_settings = ChatContextSettings {
+            enabled: true,
+            add_emojis: true,
+            max_message_length: 200,
+            split_long_messages: true,
+            format_mentions: true,
+        };
+        let prompt = manager.build_prompt("test text", "de", None, Some(&chat_settings));
+        assert!(prompt.contains("Chat-Anwendung erkannt"));
+        assert!(prompt.contains("lockeren, informellen Ton"));
+        assert!(prompt.contains("Emoji"));
+        assert!(prompt.contains("@Thomas"));
+    }
+
+    #[test]
+    fn test_chat_context_no_emojis() {
+        let manager = OllamaManager::new();
+        let chat_settings = ChatContextSettings {
+            enabled: true,
+            add_emojis: false,
+            ..Default::default()
+        };
+        let prompt = manager.build_prompt("test text", "de", None, Some(&chat_settings));
+        assert!(prompt.contains("Chat-Anwendung erkannt"));
+        assert!(prompt.contains("KEINE Emojis"));
+    }
+
+    #[test]
+    fn test_chat_context_disabled() {
+        let manager = OllamaManager::new();
+        let chat_settings = ChatContextSettings {
+            enabled: false,
+            ..Default::default()
+        };
+        let prompt = manager.build_prompt("test text", "de", None, Some(&chat_settings));
+        // Chat context disabled, so no chat instructions should appear
+        assert!(!prompt.contains("Chat-Anwendung erkannt"));
     }
 
     #[test]

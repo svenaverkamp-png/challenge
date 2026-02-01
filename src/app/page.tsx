@@ -95,6 +95,8 @@ export default function Home() {
 
     // PROJ-9: Detect if we're in an email context
     const isEmailContext = context?.category === 'email'
+    // PROJ-10: Detect if we're in a chat context
+    const isChatContext = context?.category === 'chat'
 
     // Start transcription (PROJ-4)
     if (result.file_path && isTauri) {
@@ -116,7 +118,8 @@ export default function Home() {
               const improveResult = await improveText(
                 transcriptionResult.text,
                 transcriptionResult.language,
-                isEmailContext // PROJ-9: Pass email context flag
+                isEmailContext, // PROJ-9: Pass email context flag
+                isChatContext   // PROJ-10: Pass chat context flag
               )
               if (improveResult?.was_edited && improveResult.edited_text) {
                 finalText = improveResult.edited_text

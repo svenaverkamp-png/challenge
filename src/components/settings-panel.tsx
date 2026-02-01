@@ -13,6 +13,8 @@ import { WhisperSettings } from '@/components/whisper-settings'
 import { TextInsertSettings } from '@/components/text-insert-settings'
 import { OllamaSettings } from '@/components/ollama-settings'
 import { ContextSettings } from '@/components/context-settings'
+import { EmailSettings } from '@/components/email-settings'
+import { ChatSettings } from '@/components/chat-settings'
 import { AlertCircle, Power, Settings } from 'lucide-react'
 
 export function SettingsPanel() {
@@ -38,6 +40,12 @@ export function SettingsPanel() {
 
       {/* Context Awareness Settings (PROJ-8) */}
       <ContextSettings />
+
+      {/* Email Context Settings (PROJ-9) */}
+      <EmailSettings />
+
+      {/* Chat Context Settings (PROJ-10) */}
+      <ChatSettings />
 
       {/* General Settings */}
       <Card>

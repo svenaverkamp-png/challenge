@@ -53,8 +53,8 @@ interface UseOllamaReturn {
   updateSettings: (settings: Partial<OllamaSettings>) => Promise<void>
   /** Check Ollama connection status */
   checkStatus: () => Promise<OllamaStatus | null>
-  /** Improve text using Ollama (PROJ-9: supports email context) */
-  improveText: (text: string, language: string, isEmailContext?: boolean) => Promise<AutoEditResult | null>
+  /** Improve text using Ollama (PROJ-9: supports email context, PROJ-10: supports chat context) */
+  improveText: (text: string, language: string, isEmailContext?: boolean, isChatContext?: boolean) => Promise<AutoEditResult | null>
   /** Pull (download) a model */
   pullModel: (model: string) => Promise<void>
   /** Common models for quick selection */
@@ -250,8 +250,9 @@ export function useOllama(): UseOllamaReturn {
 
   // Improve text using Ollama
   // PROJ-9: Added isEmailContext parameter for email-specific formatting
+  // PROJ-10: Added isChatContext parameter for chat-specific formatting
   const improveText = useCallback(
-    async (text: string, language: string, isEmailContext?: boolean): Promise<AutoEditResult | null> => {
+    async (text: string, language: string, isEmailContext?: boolean, isChatContext?: boolean): Promise<AutoEditResult | null> => {
       if (!isTauri) {
         // Web fallback: return original text
         return {
@@ -278,10 +279,12 @@ export function useOllama(): UseOllamaReturn {
         setIsProcessing(true)
 
         // PROJ-9: Pass isEmailContext to backend for email-specific prompt rules
+        // PROJ-10: Pass isChatContext to backend for chat-specific prompt rules
         const result = await invoke<AutoEditResult>('improve_text', {
           text,
           language,
-          isEmailContext: isEmailContext ?? false
+          isEmailContext: isEmailContext ?? false,
+          isChatContext: isChatContext ?? false
         })
         setLastResult(result)
         setIsProcessing(false)
