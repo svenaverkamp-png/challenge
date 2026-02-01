@@ -1,6 +1,6 @@
 # PROJ-3: Audio Recording
 
-## Status: 🔵 Planned
+## Status: ✅ Deployed (2026-02-01)
 
 ## Beschreibung
 Aufnahme von Audio über das System-Mikrofon. Verwaltet Mikrofon-Zugriff, Audio-Stream, Puffer und Export in ein für Whisper.cpp kompatibles Format.
