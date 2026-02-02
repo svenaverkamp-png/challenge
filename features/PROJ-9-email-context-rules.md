@@ -425,3 +425,4 @@ Bug-Status nach Fixes:
 3. ⚠️ BUG-3 (Build System): Known Issue - Erfordert `brew install cmake`
 
 **Empfehlung:** Feature ist ready für Deployment.
+

@@ -466,3 +466,4 @@ Bereits vorhanden:
 ## Status nach Fix
 
 Nach Behebung von BUG-1 und BUG-2: **Feature kann getestet werden** (manuelles E2E-Testing erforderlich)
+

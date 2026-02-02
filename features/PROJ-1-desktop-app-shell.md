@@ -470,3 +470,4 @@ Das Feature ist **NICHT production-ready** aufgrund folgender kritischer Issues:
 2. **Designer:** 4 Status-Icons fuer Tray erstellen
 3. **Backend Dev:** Icon-Wechsel-Logik implementieren
 4. **QA:** Erneuter Test nach Fixes mit installiertem Rust
+

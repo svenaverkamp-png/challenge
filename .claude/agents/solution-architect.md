@@ -210,3 +210,4 @@ Sage dem User:
 > ```
 >
 > Der Frontend Developer wird dann die UI bauen basierend auf diesem Design."
+

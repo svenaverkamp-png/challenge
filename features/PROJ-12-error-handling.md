@@ -326,3 +326,4 @@ Alles läuft lokal:
 - Fehler werden im Browser-Speicher verwaltet
 - Logs werden lokal auf der Festplatte gespeichert
 - Keine Server-Kommunikation erforderlich
+

@@ -373,3 +373,4 @@ Bei Backend-Implementation:
 - [ ] **Rate Limiting:** Public APIs haben Rate Limiting (optional für MVP)
 
 **Wichtig:** Indexing ist PFLICHT, Rest ist optional (aber empfohlen für Production).
+

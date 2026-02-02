@@ -753,3 +753,4 @@ User in Notizen → Hotkey → Context erkannt (com.apple.Notes)
 ### Status: ✅ FIX IMPLEMENTIERT
 
 Der Fix wurde implementiert und kompiliert erfolgreich. Ein manueller Test ist erforderlich um die Funktionalität zu verifizieren.
+

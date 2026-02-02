@@ -451,3 +451,4 @@ Keine neuen Packages nötig - alles baut auf bestehender Infrastruktur auf.
 - Security-Checks bestanden
 - Unit Tests vorhanden
 - Frontend-Backend Integration vollständig
+

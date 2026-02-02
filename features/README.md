@@ -110,3 +110,4 @@ Feature-Status wird direkt im Feature-Dokument getrackt:
 - Alle Implementierungs-Details sind in Git Commits
 - `git log --grep="PROJ-1"` zeigt alle Änderungen für dieses Feature
 - Keine separate FEATURE_CHANGELOG.md nötig!
+

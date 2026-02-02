@@ -512,3 +512,4 @@ Nutzt bestehende Infrastruktur:
 - [ ] User-Mappings hinzufügen/löschen testen
 - [ ] Toast bei unbekannter App verifizieren
 - [ ] Performance-Logs prüfen (sollte < 50ms sein)
+

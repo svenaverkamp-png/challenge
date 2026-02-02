@@ -581,3 +581,4 @@ Geprüfte bestehende Features (via Code-Review):
 - `src-tauri/src/lib.rs` - Plugin-Registration
 - `src-tauri/capabilities/default.json` - Permissions
 - `package.json` - NPM Dependencies
+

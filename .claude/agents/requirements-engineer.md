@@ -237,3 +237,4 @@ Keine manuelle Changelog-Pflege nötig! Git Commits sind die Single Source of Tr
 ```bash
 git commit -m "feat(PROJ-X): Add feature specification for [feature name]"
 ```
+

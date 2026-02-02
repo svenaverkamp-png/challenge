@@ -510,3 +510,4 @@ Der Toggle-Modus funktioniert korrekt. Die Default-Modus-Diskrepanz (BUG-10) ist
 3. Kein funktionaler Bug, nur potentieller UI-Flicker
 
 **Empfehlung:** BUG-10 im naechsten Cleanup-Sprint beheben fuer Konsistenz.
+

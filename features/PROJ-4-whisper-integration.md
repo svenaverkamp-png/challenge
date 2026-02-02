@@ -561,3 +561,4 @@ BUG-1, BUG-2, BUG-3 sind UX-Verbesserungen, keine Blocker.
 - ✅ BUG-4 (Path Traversal) gefixt
 
 **Empfehlung:** Feature ist production-ready. Verbleibende Bugs (1-3) sind UX-Verbesserungen.
+

@@ -604,3 +604,4 @@ Wenn die App gebaut und gestartet werden kann:
 - ✅ BUG-3 (Disk-Space-Check) gefixt
 
 **Alle gefundenen Bugs wurden behoben!**
+

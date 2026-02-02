@@ -572,3 +572,4 @@ Overlay zeigt (PROJ-5):
 - ✅ All Security Issues: **Fixed**
 - ✅ All Critical/High Bugs: **Fixed**
 - ✅ TypeScript: **Compiles without errors**
+
