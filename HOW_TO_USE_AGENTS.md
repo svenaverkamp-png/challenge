@@ -1,4 +1,4 @@
-# Wie nutze ich die AI Agents?
+# Orchestrierung der Agents - Hinweise
 
 ## ⚠️ Wichtig: Das sind KEINE Claude Code Skills!
 
