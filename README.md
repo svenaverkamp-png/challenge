@@ -13,7 +13,6 @@
 - **100% Lokal** - Alle Daten bleiben auf deinem Gerät. Keine Cloud, kein Internet erforderlich.
 - **Global Hotkey** - Drücke `Cmd+Shift+Space` in jeder App und diktiere.
 - **KI-Textverbesserung** - Entfernt Füllwörter, korrigiert Grammatik, setzt Satzzeichen.
-- **Kontext-Aware** - Erkennt E-Mail vs. Chat-Apps und passt den Ton automatisch an.
 - **Obsidian-Archiv** - Speichert alle Transkriptionen als durchsuchbare Markdown-Dateien.
 
 ---
@@ -36,9 +35,6 @@
 | Feature | Beschreibung |
 |---------|--------------|
 | **AI Auto-Edits** | Ollama-Integration für Füllwort-Entfernung, Grammatik, Rechtschreibung |
-| **Context Awareness** | Erkennt aktive App (60+ Apps gemappt) und passt Verarbeitung an |
-| **E-Mail Context** | Formeller Ton, automatische Anrede und Grußformel |
-| **Chat Context** | Lockerer Ton, kurze Sätze, optionale Emojis |
 
 ### System Features
 
@@ -56,7 +52,7 @@
 
 - **Node.js** 18+
 - **Rust** 1.77+
-- **Ollama** (optional, für KI-Textverbesserung): [ollama.com](https://ollama.com)
+- **Ollama** (erforderlich für KI-Textverbesserung): [ollama.com](https://ollama.com)
 
 ### Installation
 
@@ -72,7 +68,7 @@ npm install
 npm run tauri:dev
 ```
 
-### Ollama Setup (optional)
+### Ollama Setup (erforderlich)
 
 ```bash
 # Ollama installieren (macOS)
@@ -84,6 +80,8 @@ ollama serve
 # Empfohlenes Modell herunterladen
 ollama pull llama3.2:3b
 ```
+
+> **Hinweis:** Ollama muss im Hintergrund laufen, damit die KI-Textverbesserung funktioniert.
 
 ---
 
@@ -124,7 +122,6 @@ EverVoice
 │   ├── Audio Recording (cpal)
 │   ├── Whisper Transcription (whisper-rs)
 │   ├── Ollama Integration (HTTP API)
-│   ├── Context Detection (AppleScript/PowerShell)
 │   ├── Text Insert (enigo/arboard)
 │   └── Markdown Archive (async fs)
 │
@@ -219,42 +216,6 @@ Automatische Textverbesserung durch lokales LLM.
 - mistral:7b (genauer)
 - Benutzerdefinierte Modelle
 
-### PROJ-8: Context Awareness Engine
-
-Erkennt die aktive Anwendung und Kategorie.
-
-**Kategorien:**
-- `email`: Gmail, Outlook, Apple Mail, Thunderbird
-- `chat`: Slack, Teams, Discord, WhatsApp, Telegram
-- `social`: LinkedIn, Twitter/X, Facebook
-- `code`: VS Code, Cursor, IntelliJ, Xcode
-- `docs`: Google Docs, Notion, Word
-- `browser`: Chrome, Safari, Firefox, Arc
-- `notes`: Apple Notes, Obsidian, Bear
-- `terminal`: Terminal, iTerm2, Hyper
-
-**60+ Apps** vordefiniert, eigene Mappings möglich.
-
-### PROJ-9: E-Mail Context Rules
-
-Kontextspezifische Verarbeitung für E-Mail-Apps.
-
-- Formeller, professioneller Ton
-- Automatische Anrede erkennen und formatieren
-- Standard-Grußformel konfigurierbar
-- Name für Signatur aus Settings
-- Englische E-Mail-Konventionen bei EN-Diktat
-
-### PROJ-10: Chat Context Rules
-
-Kontextspezifische Verarbeitung für Chat-Apps.
-
-- Lockerer, informeller Ton
-- Kurze Sätze und Absätze
-- Keine formellen Anreden/Grußformeln
-- Optionale Emoji-Einfügung
-- @Mentions formatieren ("at Thomas" → "@Thomas")
-
 ### PROJ-11: Settings Panel
 
 Zentrale Einstellungs-Oberfläche.
@@ -265,9 +226,6 @@ Zentrale Einstellungs-Oberfläche.
 - **Audio**: Mikrofon, Zeitlimit, Pegel-Test
 - **Transkription**: Whisper-Modell, Sprache
 - **AI-Verarbeitung**: Ollama-Einstellungen, Korrekturen
-- **Kontext**: E-Mail/Chat-Modus Konfiguration
-- **Datenschutz**: Audio löschen, Telemetrie
-- **Archiv**: Speicherpfad, Ordnerstruktur
 
 Export/Import von Einstellungen als JSON.
 
@@ -376,6 +334,9 @@ npm run lint             # ESLint
 
 ### Geplante Features
 
+- [ ] **PROJ-8**: Context Awareness Engine (App-Erkennung)
+- [ ] **PROJ-9**: E-Mail Context Rules (formeller Ton)
+- [ ] **PROJ-10**: Chat Context Rules (lockerer Ton)
 - [ ] **PROJ-13**: Command Mode (Übersetzen, Zusammenfassen)
 - [ ] **PROJ-14**: Personal Dictionary (Fachbegriffe)
 - [ ] **PROJ-15**: Voice Commands ("Absatz", "neuer Satz")

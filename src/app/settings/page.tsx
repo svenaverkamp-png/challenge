@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { save, open } from '@tauri-apps/plugin-dialog'
-import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs'
 import { useRouter } from 'next/navigation'
 import { useTauri } from '@/hooks/use-tauri'
 import {
@@ -18,7 +16,6 @@ import {
 } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { showSuccess, showErrorByCode } from '@/lib/app-error'
 import {
   Settings,
@@ -26,15 +23,9 @@ import {
   Mic,
   Languages,
   Sparkles,
-  AppWindow,
-  Shield,
   ArrowLeft,
-  Download,
-  Upload,
   RotateCcw,
   X,
-  FolderDown,
-  FolderUp,
 } from 'lucide-react'
 
 // Settings Components
@@ -43,11 +34,7 @@ import { MicrophoneSettings } from '@/components/microphone-settings'
 import { WhisperSettings } from '@/components/whisper-settings'
 import { OllamaSettings } from '@/components/ollama-settings'
 import { TextInsertSettings } from '@/components/text-insert-settings'
-import { ContextSettings } from '@/components/context-settings'
-import { EmailSettings } from '@/components/email-settings'
-import { ChatSettings } from '@/components/chat-settings'
 import { GeneralSettings } from '@/components/general-settings'
-import { PrivacySettings } from '@/components/privacy-settings'
 
 /** Navigation categories for the sidebar */
 const CATEGORIES = [
@@ -56,8 +43,6 @@ const CATEGORIES = [
   { id: 'audio', label: 'Audio', icon: Mic },
   { id: 'transcription', label: 'Transkription', icon: Languages },
   { id: 'ai', label: 'AI-Verarbeitung', icon: Sparkles },
-  { id: 'context', label: 'Kontext', icon: AppWindow },
-  { id: 'privacy', label: 'Datenschutz', icon: Shield },
 ] as const
 
 type CategoryId = (typeof CATEGORIES)[number]['id']
@@ -66,8 +51,6 @@ export default function SettingsPage() {
   const router = useRouter()
   const { isTauri } = useTauri()
   const [activeCategory, setActiveCategory] = useState<CategoryId>('general')
-  const [isExporting, setIsExporting] = useState(false)
-  const [isImporting, setIsImporting] = useState(false)
 
   // Handle back navigation
   const handleBack = useCallback(() => {
@@ -84,73 +67,6 @@ export default function SettingsPage() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleBack])
-
-  // Export settings - save to file via dialog
-  const handleExport = async () => {
-    if (!isTauri) return
-
-    setIsExporting(true)
-    try {
-      const config = await invoke<string>('export_all_settings')
-
-      // Show save dialog
-      const filePath = await save({
-        title: 'Einstellungen exportieren',
-        defaultPath: 'evervoice-settings.json',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
-      })
-
-      if (filePath) {
-        await writeTextFile(filePath, config)
-        showSuccess('Einstellungen exportiert', `Gespeichert unter: ${filePath}`)
-      }
-    } catch (err) {
-      console.error('Export failed:', err)
-      showErrorByCode('ERR_EXPORT', 'settings', {
-        details: 'Die Einstellungen konnten nicht exportiert werden.',
-      })
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
-  // Import settings - read from file via dialog
-  const handleImport = async () => {
-    if (!isTauri) return
-
-    setIsImporting(true)
-    try {
-      // Show open dialog
-      const filePath = await open({
-        title: 'Einstellungen importieren',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
-        multiple: false,
-      })
-
-      if (filePath && typeof filePath === 'string') {
-        const content = await readTextFile(filePath)
-
-        // Validate JSON
-        const parsed = JSON.parse(content)
-        if (!parsed || typeof parsed !== 'object') {
-          throw new Error('Invalid JSON format')
-        }
-
-        await invoke('import_all_settings', { config: content })
-        showSuccess('Einstellungen importiert', 'Die Konfiguration wurde geladen. Einige Aenderungen erfordern einen Neustart.')
-
-        // Reload the page to reflect new settings
-        window.location.reload()
-      }
-    } catch (err) {
-      console.error('Import failed:', err)
-      showErrorByCode('ERR_IMPORT', 'settings', {
-        details: 'Bitte waehlen Sie eine gueltige JSON-Konfigurationsdatei.',
-      })
-    } finally {
-      setIsImporting(false)
-    }
-  }
 
   // Reset category to defaults
   const handleResetCategory = async (category: CategoryId) => {
@@ -185,16 +101,6 @@ export default function SettingsPage() {
             <TextInsertSettings />
           </div>
         )
-      case 'context':
-        return (
-          <div className="space-y-6">
-            <ContextSettings />
-            <EmailSettings />
-            <ChatSettings />
-          </div>
-        )
-      case 'privacy':
-        return <PrivacySettings />
       default:
         return null
     }
@@ -241,30 +147,6 @@ export default function SettingsPage() {
               })}
             </SidebarMenu>
 
-            {/* Export/Import at bottom */}
-            <div className="mt-auto p-4 space-y-2">
-              <Separator className="mb-4" />
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start gap-2"
-                onClick={handleExport}
-                disabled={!isTauri || isExporting}
-              >
-                <Download className="h-4 w-4" />
-                {isExporting ? 'Exportiere...' : 'Exportieren'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start gap-2"
-                onClick={handleImport}
-                disabled={!isTauri || isImporting}
-              >
-                <Upload className="h-4 w-4" />
-                {isImporting ? 'Importiere...' : 'Importieren'}
-              </Button>
-            </div>
           </SidebarContent>
         </Sidebar>
 
