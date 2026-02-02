@@ -702,3 +702,4 @@ mod tests {
         assert!(settings.use_gpu);
     }
 }
+

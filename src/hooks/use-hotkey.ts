@@ -526,3 +526,4 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     toggleRecording,
   }
 }
+

@@ -69,3 +69,4 @@ export function useErrorContext() {
 // Re-export types and functions for convenience
 export type { AppError, ErrorCode }
 export { showError, showErrorByCode }
+

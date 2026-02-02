@@ -49,3 +49,4 @@ export function useAppStatus(): UseAppStatusReturn {
 function capitalizeStatus(status: AppStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
+

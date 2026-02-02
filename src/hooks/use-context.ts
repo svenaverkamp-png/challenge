@@ -342,3 +342,4 @@ export function getCategoryIcon(category: AppCategory): string {
     default: return '📱'
   }
 }
+

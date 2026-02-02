@@ -1186,3 +1186,4 @@ mod tests {
         assert!(!sanitized.contains(TEXT_DELIMITER));
     }
 }
+

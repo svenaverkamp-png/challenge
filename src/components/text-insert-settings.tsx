@@ -298,3 +298,4 @@ export function TextInsertSettings() {
     </Card>
   )
 }
+

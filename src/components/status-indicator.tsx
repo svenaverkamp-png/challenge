@@ -64,3 +64,4 @@ export function StatusIndicator({ status, errorMessage, className }: StatusIndic
     </div>
   )
 }
+

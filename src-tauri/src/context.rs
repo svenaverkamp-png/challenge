@@ -1047,3 +1047,4 @@ mod tests {
         assert!(!parsed.mappings.is_empty());
     }
 }
+

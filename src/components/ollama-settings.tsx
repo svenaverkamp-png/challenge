@@ -600,3 +600,4 @@ export function OllamaSettings() {
     </Card>
   )
 }
+

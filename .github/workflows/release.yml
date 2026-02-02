@@ -146,3 +146,4 @@ jobs:
               release_id: ${{ needs.create-release.outputs.release_id }},
               draft: false
             })
+

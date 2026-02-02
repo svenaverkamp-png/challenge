@@ -51,3 +51,4 @@ enigo = "0.2"  # Cross-platform keyboard simulation
 
 # Ollama dependencies (PROJ-7)
 url = "2.5"  # URL parsing and validation for SSRF protection
+

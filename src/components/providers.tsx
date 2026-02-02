@@ -14,3 +14,4 @@ export function Providers({ children }: ProvidersProps) {
     </ErrorProvider>
   )
 }
+

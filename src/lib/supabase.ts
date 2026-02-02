@@ -12,3 +12,4 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // For now, export a placeholder to avoid import errors
 export const supabase = null;
+

@@ -640,3 +640,4 @@ mod tests {
         assert!(settings.device_id.is_none());
     }
 }
+

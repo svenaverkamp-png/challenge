@@ -206,3 +206,4 @@ export function ErrorDetailsModal({ open, onOpenChange, error, onRetry }: ErrorD
     </AlertDialog>
   )
 }
+

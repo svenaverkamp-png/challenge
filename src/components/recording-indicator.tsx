@@ -253,3 +253,4 @@ export function RecordingIndicator({ compact = false, className }: RecordingIndi
     </div>
   )
 }
+
