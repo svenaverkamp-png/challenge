@@ -216,7 +216,7 @@ Automatische Textverbesserung durch lokales LLM.
 - mistral:7b (genauer)
 - Benutzerdefinierte Modelle
 
-### PROJ-11: Settings Panel
+### PROJ-8: Settings Panel
 
 Zentrale Einstellungs-Oberfläche.
 
@@ -229,7 +229,7 @@ Zentrale Einstellungs-Oberfläche.
 
 Export/Import von Einstellungen als JSON.
 
-### PROJ-12: Error Handling & Notifications
+### PROJ-9: Error Handling & Notifications
 
 Zentrales Fehlerbehandlungs-System.
 
@@ -239,7 +239,7 @@ Zentrales Fehlerbehandlungs-System.
 - Error-Details Modal mit Copy-to-Clipboard
 - Lokales Logging mit Rotation
 
-### PROJ-18: Markdown Transcription Archive
+### PROJ-10: Markdown Transcription Archive
 
 Automatisches Speichern als Obsidian-kompatible Dateien.
 
@@ -334,14 +334,14 @@ npm run lint             # ESLint
 
 ### Geplante Features
 
-- [ ] **PROJ-8**: Context Awareness Engine (App-Erkennung)
-- [ ] **PROJ-9**: E-Mail Context Rules (formeller Ton)
-- [ ] **PROJ-10**: Chat Context Rules (lockerer Ton)
-- [ ] **PROJ-13**: Command Mode (Übersetzen, Zusammenfassen)
-- [ ] **PROJ-14**: Personal Dictionary (Fachbegriffe)
-- [ ] **PROJ-15**: Voice Commands ("Absatz", "neuer Satz")
-- [ ] **PROJ-16**: Snippet-Bibliothek
-- [ ] **PROJ-17**: Transkriptions-Historie mit Suche
+- [ ] **PROJ-11**: Context Awareness Engine (App-Erkennung)
+- [ ] **PROJ-12**: E-Mail Context Rules (formeller Ton)
+- [ ] **PROJ-13**: Chat Context Rules (lockerer Ton)
+- [ ] **PROJ-14**: Command Mode (Übersetzen, Zusammenfassen)
+- [ ] **PROJ-15**: Personal Dictionary (Fachbegriffe)
+- [ ] **PROJ-16**: Voice Commands ("Absatz", "neuer Satz")
+- [ ] **PROJ-17**: Snippet-Bibliothek
+- [ ] **PROJ-18**: Transkriptions-Historie mit Suche
 
 ---
 
