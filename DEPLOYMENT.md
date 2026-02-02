@@ -1,6 +1,6 @@
-# EverVoice Desktop Deployment
+# EverVoice - Deployment Guide
 
-EverVoice ist eine **lokale Desktop-App** - kein Vercel/Cloud Deployment erforderlich.
+EverVoice ist eine **lokale Desktop-App** - kein Cloud-Deployment erforderlich.
 
 ## Release-Workflow
 

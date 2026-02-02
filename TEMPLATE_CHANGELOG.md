@@ -1,7 +1,7 @@
 # Template Changelog
 
-> Tracks changes to the **AI Coding Starter Kit Template** itself.
-> For project features, use `FEATURE_CHANGELOG.md`.
+> Dokumentiert Änderungen am Template.
+> Für Feature-Änderungen siehe Git-History.
 
 ---
 

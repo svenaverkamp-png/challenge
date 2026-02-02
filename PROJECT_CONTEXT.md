@@ -1,6 +1,6 @@
-# AI Coding Starter Kit
+# EverVoice - Project Context
 
-> A Next.js template with an AI-powered development workflow using 6 specialized agents
+> Lokale Voice-to-Text Desktop App mit KI-gestützter Textverbesserung
 
 ## Vision
 Build web applications faster with AI agents handling Requirements, Architecture, Development, QA, and Deployment. Each agent has clear responsibilities and a human-in-the-loop workflow for quality control.
