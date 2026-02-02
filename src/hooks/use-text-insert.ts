@@ -36,8 +36,13 @@ interface UseTextInsertReturn {
   lastResult: TextInsertResult | null
   /** Update text insert settings */
   updateSettings: (settings: Partial<TextInsertSettings>) => Promise<void>
-  /** Insert text into active text field */
-  insertText: (text: string) => Promise<TextInsertResult | null>
+  /**
+   * Insert text into active text field
+   * @param text - The text to insert
+   * @param targetBundleId - Optional bundle ID of the app to focus before inserting (PROJ-6 FIX)
+   *                         This ensures text goes to the original app, not where the user is now
+   */
+  insertText: (text: string, targetBundleId?: string) => Promise<TextInsertResult | null>
   /** Copy text to clipboard only (without paste) */
   copyToClipboard: (text: string) => Promise<boolean>
   /** Get display name for insert method */
@@ -175,8 +180,9 @@ export function useTextInsert(): UseTextInsertReturn {
   )
 
   // Insert text into active text field
+  // PROJ-6 FIX: Added targetBundleId parameter to focus the original app before inserting
   const insertText = useCallback(
-    async (text: string): Promise<TextInsertResult | null> => {
+    async (text: string, targetBundleId?: string): Promise<TextInsertResult | null> => {
       if (!isTauri) {
         // Web fallback: use browser clipboard API
         try {
@@ -203,7 +209,12 @@ export function useTextInsert(): UseTextInsertReturn {
 
       try {
         setIsInserting(true)
-        const result = await invoke<TextInsertResult>('insert_text', { text })
+        // PROJ-6 FIX: Pass targetBundleId to focus the original app before inserting
+        // This ensures text goes to the app where the user was when they pressed the hotkey
+        const result = await invoke<TextInsertResult>('insert_text', {
+          text,
+          targetBundleId: targetBundleId || null,
+        })
         setLastResult(result)
         setIsInserting(false)
         return result

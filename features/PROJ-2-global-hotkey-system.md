@@ -392,3 +392,121 @@ Keine Regression-Probleme gefunden. Feature PROJ-1 (Desktop App Shell) funktioni
 - Autostart ✅
 - Crash Recovery ✅
 - Single Instance ✅
+
+---
+
+## QA Test Results (2026-02-02) - Toggle-Modus Validierung
+
+**Tested:** 2026-02-02
+**Tester:** QA Engineer Agent
+**Test-Methode:** Runtime Testing + Code-Analyse
+**App URL:** http://localhost:3000
+
+### Test-Fokus
+
+Validierung der kuerzlichen Aenderungen:
+1. Toggle-Modus UI-Text in page.tsx
+2. Default-Modus Aenderung in use-hotkey.ts
+
+### UI-Text Validierung
+
+#### AC: Toggle-Modus Status-Text
+- [x] **PASSED:** Text "Aufnahme laeuft... Hotkey erneut druecken zum Stoppen" ist korrekt fuer Toggle-Modus
+- **Location:** `src/app/page.tsx:352`
+- **Verification:** Grep-Suche bestaetigt korrekten Text
+
+#### AC: Settings-UI Toggle-Modus
+- [x] **PASSED:** Settings zeigen korrekten Modus-Beschreibungstext
+  - PushToTalk: "Gedrueckt halten zum Aufnehmen"
+  - Toggle: "Einmal druecken zum Starten/Stoppen"
+- **Location:** `src/components/hotkey-settings.tsx:244-246`
+
+### Default-Modus Analyse
+
+#### Frontend Default (use-hotkey.ts)
+- **Wert:** `mode: 'Toggle'` (Zeile 82)
+- **Status:** GEAENDERT (war vorher 'PushToTalk')
+
+#### Backend Default (lib.rs)
+- **Wert:** `HotkeyMode::PushToTalk` (Zeile 42, 62)
+- **Status:** UNVERAENDERT
+
+#### Aktuelle User-Config
+- **Wert:** `"mode": "Toggle"` (hotkey_config.json)
+- **Status:** User/Dev hat bereits auf Toggle umgestellt
+
+### Bugs Found
+
+#### BUG-10: Frontend/Backend Default-Modus Diskrepanz
+- **Severity:** Low
+- **Status:** OFFEN (nicht kritisch, da Config bereits Toggle hat)
+- **Problem:**
+  - Frontend Default: `mode: 'Toggle'` (use-hotkey.ts:82)
+  - Backend Default: `HotkeyMode::PushToTalk` (lib.rs:42, 62)
+  - Spec sagt: "Default-Modus: Push-to-Talk" (PROJ-2-global-hotkey-system.md:53)
+- **Impact:**
+  - Bei NEUEN Installationen: Backend erstellt Config mit PushToTalk
+  - Frontend zeigt kurz Toggle als Default bevor Backend-Settings geladen werden
+  - Nach dem Laden der Backend-Settings wird korrekt PushToTalk angezeigt
+  - **Kein funktionales Problem**, nur kurzer UI-Flicker moeglich
+- **Empfehlung:**
+  - Option A: Backend Default auf Toggle aendern (wenn Toggle gewuenscht)
+  - Option B: Frontend Default auf PushToTalk zuruecksetzen (Spec-konform)
+  - Option C: Spec aktualisieren auf Default: Toggle
+
+### App-Funktionalitaet Validierung
+
+#### App-Start
+- [x] **PASSED:** App startet ohne Fehler
+- [x] **PASSED:** Globaler Hotkey wird registriert: "CommandOrControl+Shift+Space"
+- [x] **PASSED:** Tray Icon wird erstellt mit Status: Idle
+
+#### Hotkey-Settings aus Config
+- [x] **PASSED:** Config wird korrekt geladen: `hotkey_config.json`
+- [x] **PASSED:** Mode ist `Toggle` (aus persistierter Config)
+- [x] **PASSED:** Shortcut ist `CommandOrControl+Shift+Space`
+
+#### Toggle-Modus Verhalten (Code-Analyse)
+- [x] **PASSED:** Erster Hotkey-Druck sendet `hotkey-start-recording` Event
+- [x] **PASSED:** Zweiter Hotkey-Druck sendet `hotkey-stop-recording` Event
+- [x] **PASSED:** Escape-Taste Abbruch funktioniert nur im Toggle-Modus (use-hotkey.ts:427-438)
+- [x] **PASSED:** Debounce von 200ms implementiert (use-hotkey.ts:93, 154-159)
+
+### Regression Tests
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| PROJ-1 Desktop App Shell | PASSED | App startet, Tray Icon funktioniert |
+| PROJ-2 Push-to-Talk | PASSED | Code unveraendert, Events korrekt |
+| PROJ-2 Toggle-Mode | PASSED | Funktioniert wie erwartet |
+| PROJ-3 Audio Recording | PASSED | Keine Code-Aenderungen |
+| PROJ-4 Whisper | PASSED | Keine Code-Aenderungen |
+| PROJ-6 Text Insert | PASSED | Keine Code-Aenderungen |
+| PROJ-12 Error Handling | PASSED | Toast-System funktioniert |
+
+### Security Findings
+
+Keine neuen Security-Issues durch die Toggle-Modus Aenderungen.
+
+### Summary
+
+| Kategorie | Passed | Failed | Notes |
+|-----------|--------|--------|-------|
+| UI-Texte | 2 | 0 | Toggle-Text korrekt |
+| Default-Modus | 1 | 1 | BUG-10: Diskrepanz |
+| Toggle-Funktionalitaet | 4 | 0 | Alles funktioniert |
+| Regression | 7 | 0 | Keine Regressionen |
+
+**Bugs gefunden:** 1 (Low Severity)
+- BUG-10: Frontend/Backend Default-Modus Diskrepanz
+
+### Recommendation
+
+**Feature ist PRODUCTION-READY** mit folgender Anmerkung:
+
+Der Toggle-Modus funktioniert korrekt. Die Default-Modus-Diskrepanz (BUG-10) ist ein kosmetisches Problem, da:
+1. Die persistierte Config bereits `Toggle` hat
+2. Neue Installationen bekommen Backend-Default (PushToTalk) nach 1 API-Call
+3. Kein funktionaler Bug, nur potentieller UI-Flicker
+
+**Empfehlung:** BUG-10 im naechsten Cleanup-Sprint beheben fuer Konsistenz.

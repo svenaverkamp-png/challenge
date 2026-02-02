@@ -1,20 +1,17 @@
 'use client'
 
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { StatusIndicator } from '@/components/status-indicator'
-import { RecordingIndicator } from '@/components/recording-indicator'
 import { AccessibilityPermissionDialog } from '@/components/accessibility-permission-dialog'
 import { MicrophonePermissionDialog } from '@/components/microphone-permission-dialog'
 import { useAppStatus } from '@/hooks/use-app-status'
 import { useHotkey, RecordingStopResult, AppContext } from '@/hooks/use-hotkey'
-import { useAudioRecording } from '@/hooks/use-audio-recording'
 import { useWhisper } from '@/hooks/use-whisper'
 import { useTextInsert } from '@/hooks/use-text-insert'
 import { useOllama } from '@/hooks/use-ollama'
 import { useTauri } from '@/hooks/use-tauri'
-import { useOverlayWindow } from '@/hooks/use-overlay-window'
 import { invoke } from '@tauri-apps/api/core'
 import { Mic, X, Copy, Check, Brain, Settings } from 'lucide-react'
 import { showSuccess, showWarning, showInfo, showErrorByCode } from '@/lib/app-error'
@@ -23,24 +20,6 @@ import Link from 'next/link'
 export default function Home() {
   const { status, errorMessage, setStatus } = useAppStatus()
   const { isTauri } = useTauri()
-
-  // Audio recording for audio level (PROJ-3)
-  const { audioLevel } = useAudioRecording()
-
-  // Overlay window management (PROJ-5)
-  const {
-    notifyRecordingStarted,
-    notifyRecordingStopped,
-    notifyAudioLevel,
-    notifyTranscribing,
-    notifyImproving,
-    notifyDone,
-    notifyError,
-    notifyCancelled,
-  } = useOverlayWindow()
-
-  // Track previous audio level for throttled updates
-  const lastAudioLevelRef = useRef(0)
 
   // Whisper integration (PROJ-4)
   const {
@@ -71,15 +50,11 @@ export default function Home() {
   const handleRecordingStart = useCallback(() => {
     setStatus('recording')
     setTranscriptionText(null) // Clear previous transcription
-    // PROJ-5: Notify overlay
-    notifyRecordingStarted()
-  }, [setStatus, notifyRecordingStarted])
+  }, [setStatus])
 
   // PROJ-8/PROJ-9: Accept AppContext for context-aware text processing
   const handleRecordingStop = useCallback(async (result: RecordingStopResult, context?: AppContext) => {
     setStatus('processing')
-    // PROJ-5: Notify overlay
-    notifyRecordingStopped()
 
     // Check if Whisper model is downloaded
     const currentModelStatus = modelStatus.find(s => s.model === whisperSettings.model)
@@ -87,7 +62,6 @@ export default function Home() {
     if (!currentModelStatus?.downloaded) {
       showWarning('Kein Whisper-Modell', 'Bitte laden Sie ein Modell in den Einstellungen herunter.')
       setStatus('idle')
-      notifyError('Kein Whisper-Modell')
       return
     }
 
@@ -99,9 +73,6 @@ export default function Home() {
     // Start transcription (PROJ-4)
     if (result.file_path && isTauri) {
       try {
-        // PROJ-5: Notify overlay that transcription is starting
-        notifyTranscribing()
-
         const transcriptionResult = await transcribe(result.file_path)
         if (transcriptionResult?.text) {
           let finalText = transcriptionResult.text
@@ -110,8 +81,6 @@ export default function Home() {
           // PROJ-7: Improve text with Ollama (Auto-Edit)
           // PROJ-9: Pass email context for email-specific formatting
           if (ollamaSettings.enabled) {
-            // Notify overlay that AI improvement is starting
-            notifyImproving()
             try {
               const improveResult = await improveText(
                 transcriptionResult.text,
@@ -136,8 +105,10 @@ export default function Home() {
           setTranscriptionText(finalText)
 
           // PROJ-6: Automatically insert text into active text field
+          // PROJ-6 FIX: Pass the original app's bundle_id to focus it before inserting
+          // This ensures the text goes to the app where the user was when they pressed the hotkey
           if (textInsertSettings.enabled) {
-            const insertResult = await insertText(finalText)
+            const insertResult = await insertText(finalText, context?.bundle_id)
             if (insertResult?.success) {
               showSuccess('Text eingefuegt', `${finalText.length} Zeichen in ${(totalProcessingTime / 1000).toFixed(1)}s`)
             } else if (insertResult?.in_clipboard) {
@@ -185,42 +156,22 @@ export default function Home() {
             // Archive errors are non-blocking - just log
             console.warn('Archive error:', archiveErr)
           }
-
-          // PROJ-5: Notify overlay that transcription is done
-          notifyDone()
         } else {
           showInfo('Keine Sprache erkannt', 'Bitte versuche es erneut.')
-          // PROJ-5: Still mark as done (no error)
-          notifyDone()
         }
       } catch (err) {
         console.error('Transcription failed:', err)
         showErrorByCode('ERR_TRANSCRIPTION_FAILED', 'page')
-        // PROJ-5: Notify overlay of error
-        notifyError('Transkription fehlgeschlagen')
       }
-    } else {
-      // No file path - still notify done
-      notifyDone()
     }
 
     setStatus('idle')
-  }, [setStatus, transcribe, improveText, ollamaSettings.enabled, insertText, textInsertSettings.enabled, modelStatus, whisperSettings.model, isTauri, notifyRecordingStopped, notifyTranscribing, notifyImproving, notifyDone, notifyError])
+  }, [setStatus, transcribe, improveText, ollamaSettings.enabled, insertText, textInsertSettings.enabled, modelStatus, whisperSettings.model, isTauri])
 
   const handleRecordingCancel = useCallback((reason: string) => {
     setStatus('idle')
     console.log('Recording cancelled:', reason)
-    // PROJ-5: Notify overlay
-    notifyCancelled()
-  }, [setStatus, notifyCancelled])
-
-  // PROJ-5: Send audio level updates to overlay during recording
-  useEffect(() => {
-    if (status === 'recording' && Math.abs(audioLevel - lastAudioLevelRef.current) > 2) {
-      lastAudioLevelRef.current = audioLevel
-      notifyAudioLevel(audioLevel)
-    }
-  }, [status, audioLevel, notifyAudioLevel])
+  }, [setStatus])
 
   // Copy transcription to clipboard
   const copyToClipboard = useCallback(async () => {
@@ -240,14 +191,37 @@ export default function Home() {
   // Initialize hotkey with event handlers
   const {
     recordingState,
+    recordingDuration,
     settings,
     accessibilityPermissionRequired,
     requestAccessibilityPermission,
+    error: hotkeyError, // BUG-9 FIX: Capture hotkey errors for display
+    toggleRecording, // For button click
   } = useHotkey({
     onRecordingStart: handleRecordingStart,
     onRecordingStop: handleRecordingStop,
     onRecordingCancel: handleRecordingCancel,
   })
+
+  // BUG-9 FIX: Show hotkey errors (e.g., "Recording too short")
+  useEffect(() => {
+    if (hotkeyError) {
+      showWarning(hotkeyError)
+    }
+  }, [hotkeyError])
+
+  // Format duration as M:SS
+  const formatDuration = (ms: number): string => {
+    const totalSeconds = Math.floor(ms / 1000)
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  // Filter internal markers from transcription text for display
+  const filterInternalMarkers = (text: string): string => {
+    return text.replace(/<<<USER_TEXT>>>/g, '').trim()
+  }
 
   // State for accessibility permission dialog
   const [showPermissionDialog, setShowPermissionDialog] = useState(false)
@@ -308,11 +282,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Recording Indicator - shows when recording */}
-        {recordingState !== 'idle' && (
-          <RecordingIndicator />
-        )}
-
         {/* Main Recording Area */}
         <Card className="overflow-hidden">
           <CardHeader className="text-center pb-2">
@@ -327,41 +296,50 @@ export default function Home() {
                       key === 'CommandOrControl' ? '⌘/Ctrl' :
                       key === 'Shift' ? '⇧' : key
                     ).join(' + ')}
-                  </kbd> oder klicke auf den Button
+                  </kbd> zum Aufnehmen
                 </>
               ) : (
-                'Klicke auf den Button zum Aufnehmen'
+                'Hotkey zum Aufnehmen verwenden'
               )}
             </CardDescription>
           </CardHeader>
           <CardContent className="pb-10 pt-6">
-            <div className="flex flex-col items-center justify-center space-y-8">
-              {/* Recording Button */}
+            <div className="flex flex-col items-center justify-center space-y-4">
+              {/* Timer - shows above button during recording */}
+              {recordingState === 'recording' && (
+                <div className="text-2xl font-mono font-semibold text-destructive tabular-nums">
+                  {formatDuration(recordingDuration)}
+                </div>
+              )}
+
+              {/* Recording Button - Click or use Hotkey to toggle */}
               <button
-                onClick={() => {
-                  if (status === 'recording') {
-                    setStatus('processing')
-                    setTimeout(() => setStatus('idle'), 2000)
-                  } else {
-                    setStatus('recording')
-                  }
-                }}
-                aria-label={status === 'recording' ? 'Aufnahme stoppen' : 'Aufnahme starten'}
+                type="button"
+                onClick={isTauri ? toggleRecording : undefined}
+                disabled={!isTauri || status === 'processing' || recordingState === 'processing'}
+                aria-label={recordingState === 'recording' ? 'Aufnahme stoppen' : 'Aufnahme starten'}
+                title={recordingState === 'recording'
+                  ? 'Klicken zum Stoppen'
+                  : isTauri
+                  ? 'Klicken oder Hotkey zum Aufnehmen'
+                  : 'Nur in Desktop-App verfügbar'}
                 className={`
                   relative h-28 w-28 rounded-full transition-all duration-300
-                  flex items-center justify-center
-                  ${status === 'recording'
-                    ? 'bg-destructive animate-recording-pulse'
-                    : status === 'processing'
-                    ? 'bg-primary/50 cursor-wait'
-                    : 'bg-primary shadow-glow hover:shadow-glow-lg hover:scale-105 active:scale-95'
+                  flex items-center justify-center cursor-pointer
+                  disabled:cursor-not-allowed disabled:opacity-50
+                  focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background
+                  ${recordingState === 'recording'
+                    ? 'bg-destructive animate-recording-pulse hover:bg-destructive/90'
+                    : status === 'processing' || recordingState === 'processing'
+                    ? 'bg-primary/50'
+                    : 'bg-primary shadow-glow hover:bg-primary/90'
                   }
                 `}
               >
                 <Mic
                   className={`
                     h-12 w-12 transition-all duration-200
-                    ${status === 'recording'
+                    ${recordingState === 'recording'
                       ? 'text-white'
                       : 'text-primary-foreground'
                     }
@@ -369,7 +347,7 @@ export default function Home() {
                 />
 
                 {/* Pulse rings for recording */}
-                {status === 'recording' && (
+                {recordingState === 'recording' && (
                   <>
                     <span className="absolute inset-0 rounded-full bg-destructive/30 animate-ping" />
                     <span className="absolute inset-[-8px] rounded-full border-2 border-destructive/50 animate-pulse" />
@@ -379,13 +357,17 @@ export default function Home() {
 
               {/* Status Text */}
               <p className="text-sm text-muted-foreground text-center">
-                {status === 'idle' && 'Bereit für Aufnahme'}
-                {status === 'recording' && (
+                {recordingState === 'idle' && status === 'idle' && (
+                  isTauri
+                    ? 'Klicken oder Hotkey drücken zum Aufnehmen'
+                    : 'Nur in Desktop-App verfügbar'
+                )}
+                {recordingState === 'recording' && (
                   <span className="text-destructive font-medium">
-                    Aufnahme läuft... Klicke zum Stoppen
+                    Aufnahme läuft... Klicken oder Hotkey zum Stoppen
                   </span>
                 )}
-                {status === 'processing' && (
+                {(status === 'processing' || recordingState === 'processing') && (
                   <span className="text-primary">Wird verarbeitet...</span>
                 )}
                 {status === 'error' && (
@@ -438,7 +420,7 @@ export default function Home() {
               ) : (
                 <div className="space-y-3">
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                    {transcriptionText}
+                    {transcriptionText && filterInternalMarkers(transcriptionText)}
                   </p>
                   {lastTranscription && (
                     <p className="text-xs text-muted-foreground">

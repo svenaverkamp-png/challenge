@@ -10,7 +10,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, Runtime, State,
 };
-use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 mod archive;
@@ -39,7 +39,7 @@ pub enum HotkeyMode {
 
 impl Default for HotkeyMode {
     fn default() -> Self {
-        HotkeyMode::PushToTalk
+        HotkeyMode::Toggle
     }
 }
 
@@ -59,7 +59,7 @@ impl Default for HotkeySettings {
             shortcut: "CommandOrControl+Shift+Space".to_string(),
             #[cfg(not(target_os = "macos"))]
             shortcut: "Control+Shift+Space".to_string(),
-            mode: HotkeyMode::PushToTalk,
+            mode: HotkeyMode::Toggle,
             enabled: true,
         }
     }
@@ -386,7 +386,7 @@ async fn check_shortcut_available<R: Runtime>(
 ) -> Result<bool, String> {
     let sc: Shortcut = shortcut
         .parse()
-        .map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
+        .map_err(|e| format!("{:?}", e))?;
     let is_registered = app.global_shortcut().is_registered(sc);
     Ok(!is_registered)
 }
@@ -528,6 +528,22 @@ async fn stop_audio_recording<R: Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<RecordingResult, String> {
+    // First check if recording is actually in progress
+    let is_recording = {
+        let recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
+        recorder.is_recording()
+    };
+
+    if !is_recording {
+        // Not recording - return empty result instead of error
+        log::debug!("stop_audio_recording called but not recording - returning empty result");
+        return Ok(RecordingResult {
+            file_path: String::new(),
+            duration_ms: 0,
+            privacy_mode: false,
+        });
+    }
+
     let result = {
         let mut recorder = state.audio_recorder.lock().map_err(|e| e.to_string())?;
         recorder.stop_recording().map_err(|e| {
@@ -876,11 +892,20 @@ async fn set_text_insert_settings(
 
 /// Insert text into the active text field
 /// This is the main entry point for text insertion after transcription
+///
+/// BUG-7 FIX: Text insertion with enigo MUST run on the main thread on macOS.
+/// The macOS Text Services Manager (TSM) API requires main thread access.
+/// Using run_on_main_thread() with a channel ensures the keyboard simulation doesn't crash.
+///
+/// PROJ-6 FIX: Added `target_bundle_id` parameter to focus the original app
+/// before inserting text. This ensures text goes to the app where the user was
+/// when they pressed the hotkey, not where they are after transcription completes.
 #[tauri::command]
 async fn insert_text<R: Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     text: String,
+    target_bundle_id: Option<String>,
 ) -> Result<TextInsertResult, String> {
     let settings = {
         let s = state
@@ -915,10 +940,36 @@ async fn insert_text<R: Runtime>(
         }
     }
 
-    log::info!("Inserting text: {} characters", text.len());
+    log::info!(
+        "Inserting text: {} characters, target_bundle_id: {:?}",
+        text.len(),
+        target_bundle_id
+    );
 
-    // Perform text insertion
-    let result = text_insert::insert_text(&text, &settings);
+    // BUG-7 FIX: Run text insertion on main thread to avoid macOS TSM crash
+    // The enigo library uses TSMGetInputSourceProperty which requires main thread
+    // We use a channel to get the result back from the main thread closure
+    let (tx, rx) = std::sync::mpsc::channel::<TextInsertResult>();
+    let text_clone = text.clone();
+    let settings_clone = settings.clone();
+    let bundle_id_clone = target_bundle_id.clone();
+
+    app.run_on_main_thread(move || {
+        // PROJ-6 FIX: Use insert_text_with_focus to focus the original app first
+        let result = text_insert::insert_text_with_focus(
+            &text_clone,
+            &settings_clone,
+            bundle_id_clone.as_deref(),
+        );
+        // Send result back through channel (ignore send errors - receiver might be dropped)
+        let _ = tx.send(result);
+    })
+    .map_err(|e| format!("Failed to schedule on main thread: {}", e))?;
+
+    // Wait for result from main thread (with timeout to avoid hanging)
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|e| format!("Timeout waiting for text insert result: {}", e))?;
 
     // Emit appropriate event based on result
     if result.success {
@@ -981,8 +1032,22 @@ async fn set_ollama_settings(
 /// Check Ollama connection status and model availability
 #[tauri::command]
 async fn check_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus, String> {
-    let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
-    Ok(manager.check_status().await)
+    // Clone settings to avoid holding MutexGuard across await
+    let (ollama_url, model) = {
+        let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+        let settings = manager.get_settings();
+        (settings.ollama_url.clone(), settings.model.clone())
+    };
+
+    // Create temporary manager for async operation
+    let mut temp_manager = ollama::OllamaManager::new();
+    temp_manager.update_settings(ollama::OllamaSettings {
+        ollama_url,
+        model,
+        ..Default::default()
+    });
+
+    Ok(temp_manager.check_status().await)
 }
 
 /// Improve text using Ollama (auto-edit)
@@ -1052,12 +1117,19 @@ async fn improve_text<R: Runtime>(
     // Emit processing started event
     let _ = app.emit("ollama-processing-started", &text);
 
-    let result = {
+    // Clone all settings to avoid holding MutexGuard across await
+    let ollama_settings = {
         let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
-        manager
-            .improve_text(&text, &language, email_context.as_ref(), chat_context.as_ref())
-            .await
+        manager.get_settings().clone()
     };
+
+    // Create temporary manager for async operation
+    let mut temp_manager = ollama::OllamaManager::new();
+    temp_manager.update_settings(ollama_settings);
+
+    let result = temp_manager
+        .improve_text(&text, &language, email_context.as_ref(), chat_context.as_ref())
+        .await;
 
     match result {
         Ok(edit_result) => {
@@ -1098,9 +1170,20 @@ async fn pull_ollama_model<R: Runtime>(
 ) -> Result<(), String> {
     log::info!("Starting Ollama model pull: {}", model);
 
-    let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+    // Clone the settings to avoid holding MutexGuard across await
+    let ollama_url = {
+        let manager = state.ollama_manager.lock().map_err(|e| e.to_string())?;
+        manager.get_settings().ollama_url.clone()
+    };
 
-    match manager.pull_model(&model).await {
+    // Create a temporary manager for the async operation
+    let mut temp_manager = ollama::OllamaManager::new();
+    temp_manager.update_settings(ollama::OllamaSettings {
+        ollama_url,
+        ..Default::default()
+    });
+
+    match temp_manager.pull_model(&model).await {
         Ok(()) => {
             let _ = app.emit("ollama-model-pull-started", &model);
             log::info!("Ollama model pull started: {}", model);
@@ -1354,7 +1437,7 @@ fn register_global_hotkey<R: Runtime>(
 ) -> Result<(), String> {
     let shortcut: Shortcut = shortcut_str
         .parse()
-        .map_err(|e: tauri_plugin_global_shortcut::Error| e.to_string())?;
+        .map_err(|e| format!("{:?}", e))?;
 
     let app_handle = app.clone();
     app.global_shortcut()
@@ -1390,58 +1473,59 @@ fn register_global_hotkey<R: Runtime>(
                         return;
                     }
 
-                    // PROJ-8: Detect context when hotkey is pressed
-                    let context = {
-                        if let Ok(manager) = state.context_manager.lock() {
-                            match manager.detect_context() {
-                                Ok(ctx) => {
-                                    log::debug!(
-                                        "Context detected: {:?} ({:?})",
-                                        ctx.app_name,
-                                        ctx.category
-                                    );
-                                    Some(ctx)
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to detect context: {}", e);
-                                    // Emit warning for accessibility permission
-                                    if e.contains("Accessibility permission") {
-                                        let _ = _app.emit("context-permission-required", e.clone());
-                                    }
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                    // Emit context-detected event if we have context
-                    if let Some(ref ctx) = context {
-                        let _ = _app.emit("context-detected", ctx);
-
-                        // PROJ-8 BUG-1 fix: Emit event for unknown apps
-                        if ctx.category == context::AppCategory::Other
-                            && ctx.app_name != "Desktop"
-                        {
-                            let _ = _app.emit("context-unknown-app", &ctx.app_name);
-                        }
-                    }
-
                     match mode {
                         HotkeyMode::PushToTalk => {
                             // Record press time for minimum hold duration check
                             if let Ok(mut press_time) = state.hotkey_press_time.lock() {
                                 *press_time = Some(std::time::Instant::now());
                             }
+
+                            // PROJ-8: Detect context (can be slow, but PTT requires holding)
+                            let context = {
+                                if let Ok(manager) = state.context_manager.lock() {
+                                    match manager.detect_context() {
+                                        Ok(ctx) => {
+                                            log::debug!(
+                                                "Context detected: {:?} ({:?})",
+                                                ctx.app_name,
+                                                ctx.category
+                                            );
+                                            Some(ctx)
+                                        }
+                                        Err(e) => {
+                                            log::warn!("Failed to detect context: {}", e);
+                                            if e.contains("Accessibility permission") {
+                                                let _ = _app.emit("context-permission-required", e.clone());
+                                            }
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    None
+                                }
+                            };
+
+                            // Emit context-detected event if we have context
+                            if let Some(ref ctx) = context {
+                                let _ = _app.emit("context-detected", ctx);
+                                if ctx.category == context::AppCategory::Other
+                                    && ctx.app_name != "Desktop"
+                                {
+                                    let _ = _app.emit("context-unknown-app", &ctx.app_name);
+                                }
+                            }
+
                             // Emit press event to frontend (with context)
                             let _ = _app.emit("hotkey-pressed", context);
                         }
                         HotkeyMode::Toggle => {
-                            // Toggle recording state
+                            // Toggle mode: IMMEDIATELY toggle state and emit event
+                            // Context detection happens AFTER to avoid blocking
                             let should_start = {
                                 if let Ok(mut is_recording) = state.is_recording.lock() {
+                                    let was_recording = *is_recording;
                                     *is_recording = !*is_recording;
+                                    log::info!("Toggle mode: is_recording {} -> {}", was_recording, *is_recording);
                                     *is_recording
                                 } else {
                                     false
@@ -1449,9 +1533,14 @@ fn register_global_hotkey<R: Runtime>(
                             };
 
                             if should_start {
-                                // Include context when starting recording
-                                let _ = _app.emit("hotkey-start-recording", context);
+                                // Emit start event IMMEDIATELY (no context delay)
+                                log::info!("Toggle mode: emitting hotkey-start-recording");
+                                let _ = _app.emit("hotkey-start-recording", Option::<context::AppContext>::None);
+
+                                // Detect context AFTER emitting event (non-blocking for user experience)
+                                // Context will be detected by frontend if needed
                             } else {
+                                log::info!("Toggle mode: emitting hotkey-stop-recording");
                                 let _ = _app.emit("hotkey-stop-recording", ());
                             }
                         }
@@ -2049,7 +2138,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            Some(vec!["--minimized"]),
+            None,
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // When second instance is launched, show the main window
@@ -2065,7 +2154,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         // Register managed state for app status tracking and crash detection
         .manage(initial_state)
-        .setup(|app| {
+        .setup(move |app| {
             // Setup logging with rotation (PROJ-12: Max 5 files à 10MB)
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()

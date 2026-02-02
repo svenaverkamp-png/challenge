@@ -3,6 +3,10 @@
 //! Handles automatic text insertion into active text fields using:
 //! - Clipboard + Keyboard simulation (Cmd/Ctrl+V) for fast, reliable paste
 //! - Fallback to clipboard-only when direct paste fails
+//!
+//! PROJ-6 FIX: Now includes focus management to return to the original app
+//! before inserting text. This ensures text goes to the app where the user
+//! was when they pressed the hotkey, not where they are after transcription.
 
 use arboard::Clipboard;
 use enigo::{
@@ -11,6 +15,7 @@ use enigo::{
 };
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -124,6 +129,110 @@ fn contains_complex_unicode(text: &str) -> bool {
     })
 }
 
+// ============================================================================
+// Focus Management (PROJ-6 FIX: Direct Text Insert into original app)
+// ============================================================================
+
+/// Focus an application by its bundle ID (macOS) or process name (Windows)
+/// This is called BEFORE inserting text to ensure the text goes to the
+/// original app where the user was when they pressed the hotkey.
+///
+/// Returns Ok(true) if focus was successful, Ok(false) if app not found,
+/// or Err if the operation failed.
+#[cfg(target_os = "macos")]
+pub fn focus_app_by_bundle_id(bundle_id: &str) -> Result<bool, String> {
+    // Use AppleScript to activate the app by bundle identifier
+    // This is more reliable than using process name
+    let script = format!(
+        r#"
+        try
+            tell application id "{}" to activate
+            return "success"
+        on error errMsg
+            return "error: " & errMsg
+        end try
+        "#,
+        bundle_id
+    );
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
+
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if result == "success" {
+        log::info!("Successfully focused app: {}", bundle_id);
+        // Give the app time to come to foreground
+        thread::sleep(Duration::from_millis(100));
+        Ok(true)
+    } else if result.contains("error") {
+        log::warn!("Could not focus app {}: {}", bundle_id, result);
+        Ok(false)
+    } else {
+        Ok(false)
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn focus_app_by_bundle_id(process_name: &str) -> Result<bool, String> {
+    // On Windows, we use PowerShell to activate a window by process name
+    let script = format!(
+        r#"
+        $process = Get-Process -Name "{}" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($process) {{
+            $hwnd = $process.MainWindowHandle
+            if ($hwnd -ne 0) {{
+                Add-Type @"
+                using System;
+                using System.Runtime.InteropServices;
+                public class Win32 {{
+                    [DllImport("user32.dll")]
+                    public static extern bool SetForegroundWindow(IntPtr hWnd);
+                }}
+"@
+                [Win32]::SetForegroundWindow($hwnd)
+                "success"
+            }} else {{
+                "no_window"
+            }}
+        }} else {{
+            "not_found"
+        }}
+        "#,
+        process_name.replace(".exe", "")
+    );
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|e| format!("Failed to execute PowerShell: {}", e))?;
+
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if result == "success" {
+        log::info!("Successfully focused app: {}", process_name);
+        thread::sleep(Duration::from_millis(100));
+        Ok(true)
+    } else {
+        log::warn!("Could not focus app {}: {}", process_name, result);
+        Ok(false)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn focus_app_by_bundle_id(_identifier: &str) -> Result<bool, String> {
+    // On other platforms, we can't easily focus apps
+    log::warn!("Focus management not supported on this platform");
+    Ok(false)
+}
+
+// ============================================================================
+// Text Sanitization
+// ============================================================================
+
 /// Sanitize text for safe insertion (SECURITY FIX: BUG-4)
 ///
 /// Replaces newlines with spaces to prevent command injection when
@@ -146,15 +255,27 @@ fn sanitize_for_terminal_safety(text: &str) -> String {
         .join(" ")
 }
 
-/// Insert text into active text field
+/// Insert text into active text field with optional focus management
 ///
 /// Strategy:
-/// 1. Sanitize text for terminal safety (remove newlines)
-/// 2. Save original clipboard content
-/// 3. Copy text to clipboard
-/// 4. Simulate Cmd/Ctrl+V to paste
-/// 5. Restore original clipboard (if enabled)
-pub fn insert_text(text: &str, settings: &TextInsertSettings) -> TextInsertResult {
+/// 1. Focus the target app (if bundle_id provided) - PROJ-6 FIX
+/// 2. Sanitize text for terminal safety (remove newlines)
+/// 3. Save original clipboard content
+/// 4. Copy text to clipboard
+/// 5. Simulate Cmd/Ctrl+V to paste
+/// 6. Restore original clipboard (if enabled)
+///
+/// The `target_bundle_id` parameter is crucial for the main use case:
+/// - User is in "Notes" app
+/// - User presses hotkey -> context captures bundle_id "com.apple.Notes"
+/// - User speaks, transcription runs
+/// - This function is called with target_bundle_id = "com.apple.Notes"
+/// - We focus Notes FIRST, then paste -> text goes to Notes, not EverVoice!
+pub fn insert_text_with_focus(
+    text: &str,
+    settings: &TextInsertSettings,
+    target_bundle_id: Option<&str>,
+) -> TextInsertResult {
     if text.is_empty() {
         return TextInsertResult {
             success: false,
@@ -165,41 +286,54 @@ pub fn insert_text(text: &str, settings: &TextInsertSettings) -> TextInsertResul
         };
     }
 
+    // PROJ-6 FIX: Focus the target app BEFORE inserting text
+    // This ensures the text goes to the app where the user was when they pressed the hotkey
+    if let Some(bundle_id) = target_bundle_id {
+        if !bundle_id.is_empty() {
+            log::info!("Focusing target app before text insert: {}", bundle_id);
+            match focus_app_by_bundle_id(bundle_id) {
+                Ok(true) => {
+                    log::info!("Successfully focused target app: {}", bundle_id);
+                }
+                Ok(false) => {
+                    log::warn!(
+                        "Could not focus app {} - will insert to current app",
+                        bundle_id
+                    );
+                }
+                Err(e) => {
+                    log::warn!("Error focusing app {}: {} - will insert to current app", bundle_id, e);
+                }
+            }
+        }
+    }
+
     // SECURITY (BUG-4 fix): Sanitize text to prevent terminal command injection
-    // Newlines are replaced with spaces to prevent accidental command execution
-    // if the user happens to be focused on a terminal window
     let sanitized_text = sanitize_for_terminal_safety(text);
     let text_len = sanitized_text.len();
 
-    // Decide method based on settings and text characteristics
-    // BUG-3/5/6 FIX: Auto mode now ALWAYS uses clipboard for:
-    // - Reliability (works even if no text field is focused - text stays in clipboard)
-    // - No interrupt issues (clipboard paste is atomic, no char-by-char conflicts)
-    // - Unicode/Umlaut support (clipboard handles all characters correctly)
+    // Decide method based on settings
     let use_clipboard_paste = match settings.insert_method {
         InsertMethod::Clipboard => true,
         InsertMethod::Keyboard => false,
-        InsertMethod::Auto => {
-            // BUG-3/5/6 FIX: Always use clipboard in Auto mode
-            // Keyboard mode is only used when explicitly selected
-            // Rationale:
-            // - Clipboard + Paste is faster and more reliable
-            // - If no text field is focused, text remains in clipboard (BUG-3)
-            // - No race condition with user typing (BUG-5)
-            // - Full Unicode/Umlaut support (BUG-6)
-            true
-        }
+        InsertMethod::Auto => true, // BUG-3/5/6 FIX: Always use clipboard in Auto mode
     };
 
     if use_clipboard_paste {
         insert_via_clipboard(&sanitized_text, settings)
     } else {
-        // Try keyboard first, fallback to clipboard
         match insert_via_keyboard(&sanitized_text, settings) {
             Ok(result) => result,
             Err(_) => insert_via_clipboard(&sanitized_text, settings),
         }
     }
+}
+
+/// Insert text into active text field (legacy function without focus management)
+/// Kept for backward compatibility - delegates to insert_text_with_focus
+pub fn insert_text(text: &str, settings: &TextInsertSettings) -> TextInsertResult {
+    // Delegate to the new function without focus management
+    insert_text_with_focus(text, settings, None)
 }
 
 /// Insert text via clipboard + paste (Cmd/Ctrl+V)

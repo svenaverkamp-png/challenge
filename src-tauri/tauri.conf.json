@@ -18,7 +18,7 @@
         "height": 600,
         "resizable": true,
         "fullscreen": false,
-        "visible": false,
+        "visible": true,
         "center": true
       },
       {
@@ -65,10 +65,5 @@
       "infoPlist": "Info.plist"
     }
   },
-  "plugins": {
-    "autostart": {
-      "macOSLaunchAgent": true,
-      "args": ["--minimized"]
-    }
-  }
+  "plugins": {}
 }

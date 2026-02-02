@@ -327,8 +327,8 @@ impl OllamaManager {
         let mut chunks = Vec::new();
         let mut current_chunk = Vec::new();
 
-        for word in words {
-            current_chunk.push(word);
+        for word in &words {
+            current_chunk.push(*word);
             if current_chunk.len() >= MAX_CHUNK_WORDS {
                 chunks.push(current_chunk.join(" "));
                 current_chunk.clear();
@@ -462,6 +462,9 @@ impl OllamaManager {
             }
         }
 
+        // Store formatted string for lifetime
+        let spelling_instruction: String;
+
         if self.settings.fix_spelling {
             if is_german {
                 // BUG-2 fix: Spelling reform option
@@ -470,7 +473,8 @@ impl OllamaManager {
                 } else {
                     "Verwende alte Rechtschreibung wo angemessen"
                 };
-                instructions.push(&format!("3. Korrigiere Rechtschreibfehler (dass/das, seit/seid, wieder/wider, Getrennt-/Zusammenschreibung). {}", spelling_note));
+                spelling_instruction = format!("3. Korrigiere Rechtschreibfehler (dass/das, seit/seid, wieder/wider, Getrennt-/Zusammenschreibung). {}", spelling_note);
+                instructions.push(&spelling_instruction);
             } else if is_english {
                 instructions.push("3. Fix spelling errors (common homophones: their/there/they're, your/you're, its/it's)");
             } else {

@@ -273,7 +273,7 @@ export function HotkeySettings() {
 
                   {/* Mode Info */}
                   <div className="rounded-lg bg-muted/20 p-4">
-                    <p className="text-xs text-muted-foreground leading-relaxed">
+                    <div className="text-xs text-muted-foreground leading-relaxed">
                       {settings.mode === 'PushToTalk' ? (
                         <>
                           <strong>Push-to-Talk:</strong> Halte die Taste gedrückt
@@ -286,7 +286,7 @@ export function HotkeySettings() {
                           Aufnahme und erneut zum Beenden. Drücke <Badge variant="secondary" className="text-xs">Esc</Badge> zum Abbrechen.
                         </>
                       )}
-                    </p>
+                    </div>
                   </div>
                 </>
               )}

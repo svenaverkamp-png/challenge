@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
@@ -40,7 +40,7 @@ fs2 = "0.4"  # For disk space checking (BUG-3 fix)
 
 # Whisper.cpp integration dependencies (PROJ-4)
 whisper-rs = "0.11"  # Rust bindings for whisper.cpp
-reqwest = { version = "0.11", features = ["stream"] }  # HTTP downloads with progress
+reqwest = { version = "0.11", features = ["stream", "json"] }  # HTTP downloads with progress
 sha2 = "0.10"  # Hash verification for downloaded models
 futures-util = "0.3"  # For async stream processing
 tokio = { version = "1", features = ["sync", "fs"] }  # Async runtime for downloads

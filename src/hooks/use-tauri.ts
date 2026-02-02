@@ -7,14 +7,30 @@ import { invoke } from '@tauri-apps/api/core'
 export type AppStatus = 'Idle' | 'Recording' | 'Processing' | 'Error'
 
 /**
+ * Check if running inside Tauri environment (works for Tauri 2.x)
+ * Only call this on the client side!
+ */
+function checkIsTauri(): boolean {
+  // Tauri 2.x uses __TAURI_INTERNALS__
+  if ('__TAURI_INTERNALS__' in window) return true
+
+  // Fallback: check for __TAURI__ (Tauri 1.x compatibility)
+  if ('__TAURI__' in window) return true
+
+  return false
+}
+
+/**
  * Hook to detect if running inside Tauri environment
+ * Uses useEffect to avoid hydration mismatch between server and client
  */
 export function useTauri() {
+  // Always start with false to match server rendering
   const [isTauri, setIsTauri] = useState(false)
 
   useEffect(() => {
-    // Check if running in Tauri
-    setIsTauri(typeof window !== 'undefined' && '__TAURI__' in window)
+    // Only check on client after hydration
+    setIsTauri(checkIsTauri())
   }, [])
 
   return { isTauri }

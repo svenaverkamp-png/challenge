@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  // Hide Next.js dev tools indicator in production
+  devIndicators: false,
 };
 
 export default nextConfig;

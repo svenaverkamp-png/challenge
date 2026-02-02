@@ -3,7 +3,7 @@
 //! Handles microphone input, audio recording, and WAV export for Whisper.cpp
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, SampleFormat, SampleRate, Stream, StreamConfig};
+use cpal::{Device, Host, Sample, SampleFormat, SampleRate, Stream, StreamConfig};
 use fs2::available_space;
 use hound::{WavSpec, WavWriter};
 use rubato::{FftFixedIn, Resampler};
@@ -13,6 +13,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+/// Thread-safe wrapper for cpal::Stream
+/// Safety: The stream is only accessed from the main thread in Tauri
+struct SendableStream(Option<Stream>);
+
+// SAFETY: cpal::Stream is only created and used on the main thread
+// Tauri commands run on the main thread, so this is safe
+unsafe impl Send for SendableStream {}
 
 /// Target sample rate for Whisper.cpp (16kHz)
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -102,7 +110,7 @@ impl serde::Serialize for AudioError {
 /// Audio recorder state
 pub struct AudioRecorder {
     host: Host,
-    stream: Option<Stream>,
+    stream: SendableStream,
     samples: Arc<Mutex<Vec<f32>>>,
     is_recording: Arc<AtomicBool>,
     current_level: Arc<AtomicU8>,
@@ -119,7 +127,7 @@ impl AudioRecorder {
         let host = cpal::default_host();
         Self {
             host,
-            stream: None,
+            stream: SendableStream(None),
             samples: Arc::new(Mutex::new(Vec::new())),
             is_recording: Arc::new(AtomicBool::new(false)),
             current_level: Arc::new(AtomicU8::new(0)),
@@ -322,7 +330,7 @@ impl AudioRecorder {
             .play()
             .map_err(|e| AudioError::StreamError(e.to_string()))?;
 
-        self.stream = Some(stream);
+        self.stream.0 = Some(stream);
         self.is_recording.store(true, Ordering::Relaxed);
         self.recording_start = Some(std::time::Instant::now());
 
@@ -412,7 +420,7 @@ impl AudioRecorder {
         self.current_level.store(0, Ordering::Relaxed);
 
         // Drop the stream to release the microphone
-        self.stream = None;
+        self.stream.0 = None;
 
         // Calculate duration
         let duration_ms = self

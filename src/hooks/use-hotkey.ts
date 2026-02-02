@@ -42,8 +42,8 @@ export interface AppContext {
 export interface HotkeyEvents {
   /** Called when recording starts. Receives AppContext if detected (PROJ-8/PROJ-9) */
   onRecordingStart?: (context?: AppContext) => void
-  /** Called when recording stops. Receives result and AppContext for context-aware processing */
-  onRecordingStop?: (result: RecordingStopResult, context?: AppContext) => void
+  /** Called when recording stops. Receives result and AppContext for context-aware processing. Can be async. */
+  onRecordingStop?: (result: RecordingStopResult, context?: AppContext) => void | Promise<void>
   onRecordingCancel?: (reason: string) => void
 }
 
@@ -72,12 +72,16 @@ interface UseHotkeyReturn {
   recordingDuration: number
   /** Current app context detected at recording start (PROJ-8/PROJ-9) */
   currentContext: AppContext | null
+  /** Reset recording state to idle (call after transcription completes) */
+  resetRecordingState: () => void
+  /** Toggle recording - start if idle, stop if recording */
+  toggleRecording: () => void
 }
 
 /** Default hotkey settings */
 const DEFAULT_SETTINGS: HotkeySettings = {
   shortcut: 'CommandOrControl+Shift+Space',
-  mode: 'PushToTalk',
+  mode: 'Toggle',
   enabled: true,
 }
 
@@ -114,6 +118,8 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
   const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // PROJ-8/PROJ-9: Ref to access current context in callbacks
   const currentContextRef = useRef<AppContext | null>(null)
+  // BUG-8 FIX: Guard to prevent multiple concurrent stopRecording calls
+  const isStoppingRef = useRef<boolean>(false)
 
   // Load settings on mount
   useEffect(() => {
@@ -220,6 +226,14 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
 
   // Stop recording handler
   const stopRecording = useCallback(async () => {
+    // BUG-8 FIX: Guard against multiple concurrent calls
+    // This prevents race conditions where multiple hotkey events trigger stopRecording
+    if (isStoppingRef.current) {
+      console.debug('stopRecording already in progress, ignoring duplicate call')
+      return
+    }
+    isStoppingRef.current = true
+
     // Clear timeouts
     if (maxTimeoutRef.current) {
       clearTimeout(maxTimeoutRef.current)
@@ -241,30 +255,42 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
 
     setRecordingState('processing')
 
-    // Stop audio recording and get result (PROJ-3)
-    if (isTauri) {
-      try {
-        await invoke('set_recording_state', { recording: false })
-        const result = await invoke<RecordingStopResult>('stop_audio_recording')
-        console.log('Recording saved to:', result.file_path)
-        // PROJ-8/PROJ-9: Pass file_path and context to callback for context-aware processing
-        events?.onRecordingStop?.(result, currentContextRef.current || undefined)
-      } catch (err) {
-        console.error('Failed to stop recording:', err)
-        setError('Aufnahme konnte nicht gespeichert werden')
+    // BUG-8 FIX: Use try-finally to ensure guard is always reset
+    try {
+      // Stop audio recording and get result (PROJ-3)
+      if (isTauri) {
+        try {
+          await invoke('set_recording_state', { recording: false })
+          const result = await invoke<RecordingStopResult>('stop_audio_recording')
+          console.log('Recording saved to:', result.file_path)
+          // PROJ-8/PROJ-9: Pass file_path and context to callback for context-aware processing
+          // BUGFIX: Await the callback to ensure transcription completes before resetting state
+          await events?.onRecordingStop?.(result, currentContextRef.current || undefined)
+        } catch (err) {
+          console.error('Failed to stop recording:', err)
+          // BUG-9 FIX: Handle "No audio data recorded" error gracefully
+          // This happens when the user releases the hotkey too quickly
+          const errorMessage = String(err)
+          if (errorMessage.includes('No audio data recorded')) {
+            setError('Aufnahme zu kurz - bitte Taste länger halten')
+          } else {
+            setError('Aufnahme konnte nicht gespeichert werden')
+          }
+        }
+      } else {
+        // Non-Tauri mode: pass dummy result
+        await events?.onRecordingStop?.({ file_path: '', duration_ms: 0, privacy_mode: false }, currentContextRef.current || undefined)
       }
-    } else {
-      // Non-Tauri mode: pass dummy result
-      events?.onRecordingStop?.({ file_path: '', duration_ms: 0, privacy_mode: false }, currentContextRef.current || undefined)
-    }
-
-    // After processing is done, reset to idle
-    // In production, this should wait for transcription to complete (PROJ-4)
-    setTimeout(() => {
+    } finally {
+      // Reset state after transcription completes (BUGFIX: was resetting prematurely)
       setRecordingState('idle')
       setRecordingStartTime(null)
       setRecordingDuration(0)
-    }, 500)
+      setCurrentContext(null)
+      currentContextRef.current = null
+      // BUG-8 FIX: Reset guard after completion (always, even on error)
+      isStoppingRef.current = false
+    }
   }, [events, isTauri])
 
   // Cancel recording handler
@@ -295,8 +321,10 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
           await invoke('set_recording_state', { recording: false })
           // Stop and get the file, then delete it since cancelled
           const result = await invoke<{ file_path: string; duration_ms: number; privacy_mode: boolean }>('stop_audio_recording')
-          // Delete the cancelled recording
-          await invoke('delete_recording', { filePath: result.file_path })
+          // Delete the cancelled recording (only if there's a file)
+          if (result.file_path) {
+            await invoke('delete_recording', { filePath: result.file_path })
+          }
         } catch (err) {
           console.error('Failed to cancel recording:', err)
         }
@@ -311,74 +339,90 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     [events, isTauri]
   )
 
-  // Listen for Tauri events
+  // Ref to track current recording state for event handlers (avoids stale closures)
+  const recordingStateRef = useRef<RecordingState>(recordingState)
+  useEffect(() => {
+    recordingStateRef.current = recordingState
+  }, [recordingState])
+
+  // Listen for Tauri events - setup ONCE, use refs for current state
   useEffect(() => {
     if (!isTauri) return
 
+    let mounted = true
     const unlisteners: UnlistenFn[] = []
 
     const setupListeners = async () => {
       // Push-to-Talk: Start on press
       // PROJ-8/PROJ-9: Event payload contains AppContext for context-aware processing
       const unlistenPressed = await listen<AppContext | null>('hotkey-pressed', (event) => {
-        if (recordingState === 'idle') {
+        if (!mounted) return
+        if (recordingStateRef.current === 'idle') {
           startRecording(event.payload || undefined)
         }
       })
-      unlisteners.push(unlistenPressed)
+      if (mounted) unlisteners.push(unlistenPressed)
 
       // Push-to-Talk: Stop on release (if held long enough)
       const unlistenReleased = await listen('hotkey-released', () => {
-        if (recordingState === 'recording') {
+        if (!mounted) return
+        if (recordingStateRef.current === 'recording') {
           stopRecording()
         }
       })
-      unlisteners.push(unlistenReleased)
+      if (mounted) unlisteners.push(unlistenReleased)
 
       // Push-to-Talk: Cancel if not held long enough
       const unlistenCancelled = await listen<string>('hotkey-cancelled', (event) => {
-        if (recordingState === 'recording') {
+        if (!mounted) return
+        if (recordingStateRef.current === 'recording') {
           cancelRecording(event.payload)
         }
       })
-      unlisteners.push(unlistenCancelled)
+      if (mounted) unlisteners.push(unlistenCancelled)
 
       // Toggle mode: Start recording
       // PROJ-8/PROJ-9: Event payload contains AppContext for context-aware processing
       const unlistenStart = await listen<AppContext | null>('hotkey-start-recording', (event) => {
-        if (recordingState === 'idle') {
+        if (!mounted) return
+        if (recordingStateRef.current === 'idle') {
           startRecording(event.payload || undefined)
         }
       })
-      unlisteners.push(unlistenStart)
+      if (mounted) unlisteners.push(unlistenStart)
 
       // Toggle mode: Stop recording
       const unlistenStop = await listen('hotkey-stop-recording', () => {
-        if (recordingState === 'recording') {
+        if (!mounted) return
+        if (recordingStateRef.current === 'recording') {
           stopRecording()
         }
       })
-      unlisteners.push(unlistenStop)
+      if (mounted) unlisteners.push(unlistenStop)
 
       // EC-2.4: Hotkey pressed during processing
       const unlistenBusy = await listen('hotkey-busy', () => {
+        if (!mounted) return
         showInfo('Verarbeitung läuft...', 'Bitte warte bis die aktuelle Aufnahme verarbeitet wurde')
       })
-      unlisteners.push(unlistenBusy)
+      if (mounted) unlisteners.push(unlistenBusy)
 
       // EC-2.2: Accessibility permission required (macOS)
       const unlistenPermission = await listen('accessibility-permission-required', () => {
+        if (!mounted) return
         setAccessibilityPermissionRequired(true)
       })
-      unlisteners.push(unlistenPermission)
+      if (mounted) unlisteners.push(unlistenPermission)
     }
 
     setupListeners()
 
     return () => {
+      mounted = false
+      // Cleanup all listeners
       unlisteners.forEach((unlisten) => unlisten())
     }
-  }, [isTauri, recordingState, startRecording, stopRecording, cancelRecording])
+  }, [isTauri, startRecording, stopRecording, cancelRecording]) // Removed recordingState from deps!
 
   // Escape key handler for canceling in Toggle mode
   useEffect(() => {
@@ -443,6 +487,25 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     }
   }, [isTauri])
 
+  // Reset recording state to idle (called by parent after transcription completes)
+  const resetRecordingState = useCallback(() => {
+    setRecordingState('idle')
+    setRecordingStartTime(null)
+    setRecordingDuration(0)
+    setCurrentContext(null)
+    currentContextRef.current = null
+  }, [])
+
+  // Toggle recording - start if idle, stop if recording
+  const toggleRecording = useCallback(() => {
+    if (recordingStateRef.current === 'idle') {
+      startRecording()
+    } else if (recordingStateRef.current === 'recording') {
+      stopRecording()
+    }
+    // If processing, do nothing (user should wait)
+  }, [startRecording, stopRecording])
+
   return {
     settings,
     isLoading,
@@ -457,5 +520,9 @@ export function useHotkey(events?: HotkeyEvents): UseHotkeyReturn {
     recordingDuration,
     // PROJ-8/PROJ-9: Expose current context for context-aware processing
     currentContext,
+    // Reset state after transcription completes
+    resetRecordingState,
+    // Toggle recording via button click
+    toggleRecording,
   }
 }
